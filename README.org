@@ -1,0 +1,8 @@
+* StructArguments
+Parse arguments based on struct in Zig.
+
+
+* Acknowledgment
+- [[https://github.com/MasterQ32/zig-args/][MasterQ32/zig-args: Simple-to-use argument parser with struct-based config]]
+- [[https://github.com/Hejsil/zig-clap][Hejsil/zig-clap: Simple command line argument parsing library]]
+- [[https://github.com/evangrayk/zig-argparse][evangrayk/zig-argparse: Command line argument parsing made easy in zig]]
