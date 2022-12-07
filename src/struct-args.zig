@@ -84,7 +84,7 @@ const OptionType = enum(u32) {
     Float,
     String,
 
-    fn from_zig_type(comptime T: type, comptime is_option: bool) OptionType {
+    fn from_zig_type(comptime T: type, comptime is_optional: bool) OptionType {
         const base_type: @This() = switch (@typeInfo(T)) {
             .Int => .RequiredInt,
             .Bool => .RequiredBool,
@@ -101,7 +101,7 @@ const OptionType = enum(u32) {
                 @compileError("not supported option type:" ++ @typeName(T));
             },
         };
-        return @intToEnum(@This(), @enumToInt(base_type) + if (is_option) @This().REQUIRED_VERSION_SHIFT else 0);
+        return @intToEnum(@This(), @enumToInt(base_type) + if (is_optional) @This().REQUIRED_VERSION_SHIFT else 0);
     }
 
     fn is_required(self: @This()) bool {
@@ -148,12 +148,12 @@ fn OptionParser(
 
             // parse short names
             if (@hasDecl(T, "__shorts__")) {
-                const short_type_info = @typeInfo(@TypeOf(T.__shorts__));
-                if (short_type_info != .Struct) {
-                    @compileError("short option should be defined using struct, found " ++ @typeName(T));
+                const shorts_type = @TypeOf(T.__shorts__);
+                if (@typeInfo(shorts_type) != .Struct) {
+                    @compileError("__shorts__ should be defined using struct, found " ++  @typeName(@typeInfo(shorts_type)));
                 }
 
-                inline for (short_type_info.Struct.fields) |fld| {
+                inline for (std.meta.fields(shorts_type)) |fld| {
                     const long_name = fld.name;
                     var option = opts.getPtr(long_name) orelse {
                         std.log.err("no such long option, value: {s}", .{long_name});
@@ -162,12 +162,29 @@ fn OptionParser(
 
                     const short_name = @field(T.__shorts__, long_name);
                     if (@typeInfo(@TypeOf(short_name)) != .EnumLiteral) {
-                        @compileError("short option value must be literal enum, found " ++ @typeName(T));
+                        @compileError("short option value must be literal enum, found " ++ @typeName(@typeInfo(@TypeOf(short_name))));
                     }
                     option.short_name = @tagName(short_name)[0];
                 }
             }
 
+            // parse messages
+            if (@hasDecl(T, "__messages__")) {
+                const messages_type = @TypeOf(T.__messages__);
+                if (@typeInfo(messages_type) != .Struct) {
+                    @compileError("__messages__ should be defined using struct, found " ++  @typeName(@typeInfo(messages_type)));
+                }
+
+                inline for (std.meta.fields(messages_type)) |fld| {
+                    const long_name = fld.name;
+                    var option = opts.getPtr(long_name) orelse {
+                        std.log.err("no such long option, value: {s}", .{long_name});
+                        return error.NoLongOtion;
+                    };
+
+                    option.message =  @field(T.__messages__, long_name);
+                }
+            }
             return .{
                 .allocator = allocator,
                 .parsedOptions = opts,

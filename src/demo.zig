@@ -13,9 +13,9 @@ const CliOption = struct {
         .action = .a,
     };
 
-    // const __messages__ = .{
-    //     .help = "show help",
-    // };
+    pub const __messages__ = .{
+        .help = "show help",
+    };
 
 };
 
