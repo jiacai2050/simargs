@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '**.zig'
+  push:
+    branches:
+      - main
+    paths:
+      - '**.zig'
+
+jobs:
+  test:
+    timeout-minutes: 10
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: goto-bus-stop/setup-zig@v1
+        with:
+          version: master
+      - name: Run demo
+        run: zig build run-demo
+      - name: Memory leak detect
+        run: |
+          zig build -Dcpu=baseline --verbose
+          TEST_BINARY=./zig-out/bin/demo
+          valgrind --leak-check=full --tool=memcheck \
+          --show-leak-kinds=all --error-exitcode=1 ${TEST_BINARY} --action eat

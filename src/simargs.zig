@@ -1,4 +1,4 @@
-//! Parse arg options using struct
+//! A simple, opinionated, struct-based argument parser in Zig
 
 const std = @import("std");
 const testing = std.testing;
@@ -10,21 +10,136 @@ const OptionError = ParseError || std.mem.Allocator.Error || std.fmt.ParseIntErr
 pub fn parse(
     allocator: std.mem.Allocator,
     comptime T: type,
-) !StructArguments(WithDefault(T)) {
-    var parser = try OptionParser(T).init(allocator);
+) !StructArguments(T) {
+    var parser = OptionParser(T).init(allocator, comptime parseOptionFields(T));
     return parser.parse();
+}
+
+fn parseOptionFields(comptime T: type) [std.meta.fields(T).len]OptionField {
+    const option_type_info = @typeInfo(T);
+    if (option_type_info != .Struct) {
+        @compileError("option should be defined using struct, found " ++ @typeName(T));
+    }
+
+    var opt_fields: [std.meta.fields(T).len]OptionField = undefined;
+    inline for (option_type_info.Struct.fields) |fld, idx| {
+        const long_name = fld.name;
+        const opt_type = OptionType.from_zig_type(fld.field_type, false);
+        opt_fields[idx] = .{
+            .long_name = long_name,
+            .opt_type = opt_type,
+            .is_set = false,
+        };
+    }
+
+    // parse short names
+    if (@hasDecl(T, "__shorts__")) {
+        const shorts_type = @TypeOf(T.__shorts__);
+        if (@typeInfo(shorts_type) != .Struct) {
+            @compileError("__shorts__ should be defined using struct, found " ++ @typeName(@typeInfo(shorts_type)));
+        }
+
+        comptime inline for (std.meta.fields(shorts_type)) |fld| {
+            const long_name = fld.name;
+            inline for (opt_fields) |*opt_fld| {
+                if (std.mem.eql(u8, opt_fld.long_name, long_name)) {
+                    const short_name = @field(T.__shorts__, long_name);
+                    if (@typeInfo(@TypeOf(short_name)) != .EnumLiteral) {
+                        @compileError("short option value must be literal enum, found " ++ @typeName(@typeInfo(@TypeOf(short_name))));
+                    }
+                    opt_fld.short_name = @tagName(short_name)[0];
+
+                    break;
+                }
+            } else {
+                @compileError("no such option exists, long_name: " ++ long_name);
+            }
+        };
+    }
+
+    // parse messages
+    if (@hasDecl(T, "__messages__")) {
+        const messages_type = @TypeOf(T.__messages__);
+        if (@typeInfo(messages_type) != .Struct) {
+            @compileError("__messages__ should be defined using struct, found " ++ @typeName(@typeInfo(messages_type)));
+        }
+
+        inline for (std.meta.fields(messages_type)) |fld| {
+            const long_name = fld.name;
+            inline for (opt_fields) |*opt_fld| {
+                if (std.mem.eql(u8, opt_fld.long_name, long_name)) {
+                    opt_fld.message = @field(T.__messages__, long_name);
+                    break;
+                }
+            } else {
+                @compileError("no such option exists, long_name: " ++ long_name);
+            }
+        }
+    }
+
+    return opt_fields;
 }
 
 fn StructArguments(comptime T: type) type {
     return struct {
         program: []const u8,
-        args: T,
+        args: WithDefault(T),
         positional_args: std.ArrayList([]const u8),
         allocator: std.mem.Allocator,
 
         pub fn deinit(self: @This()) void {
             self.allocator.free(self.program);
             self.positional_args.deinit();
+        }
+
+        pub fn print_help(
+            self: @This(),
+        ) !void {
+            const fields = comptime parseOptionFields(T);
+            var stdout = std.io.getStdOut();
+            var w = stdout.writer();
+            var buf = std.ArrayList([]const u8).init(self.allocator);
+            defer buf.deinit();
+
+            const header_tmpl =
+                \\ USAGE:
+                \\     {s} [OPTIONS] ...
+                \\
+                \\ OPTIONS:
+            ;
+            const header = try std.fmt.allocPrint(self.allocator, header_tmpl, .{
+                self.program,
+            });
+            try buf.append(header);
+            // TODO: Maybe be too small(or big)?
+            const msg_offset = 25;
+            for (fields) |fld| {
+                var line_buf = std.ArrayList([]const u8).init(self.allocator);
+                try line_buf.append("\t");
+                if (fld.short_name) |sn| {
+                    try line_buf.append("-");
+                    try line_buf.append(&[_]u8{sn});
+                    try line_buf.append(", ");
+                } else {
+                    try line_buf.append("    ");
+                }
+                try line_buf.append("--");
+                try line_buf.append(fld.long_name);
+
+                var blanks = msg_offset - (4 + 2 + fld.long_name.len);
+                while (blanks > 0) {
+                    try line_buf.append(" ");
+                    blanks -= 1;
+                }
+
+                if (fld.message) |msg| {
+                    try line_buf.append(msg);
+                }
+                const line = try std.mem.join(self.allocator, "", line_buf.items);
+                try buf.append(line);
+            }
+
+            try w.writeAll(try std.mem.join(self.allocator, "\n", buf.items));
         }
     };
 }
@@ -109,87 +224,35 @@ const OptionType = enum(u32) {
     }
 };
 
+const OptionField = struct {
+    long_name: []const u8,
+    short_name: ?u8 = null,
+    message: ?[]const u8 = null,
+    opt_type: OptionType,
+    is_set: bool,
+};
+
 fn OptionParser(
     comptime T: type,
 ) type {
     return struct {
-        parsedOptions: OptionFields,
+        parsedOptions: [std.meta.fields(T).len]OptionField,
         allocator: std.mem.Allocator,
 
         const Self = @This();
 
-        const OptionField = struct {
-            long_name: []const u8,
-            short_name: ?u8 = null,
-            message: ?[]const u8 = null,
-            opt_type: OptionType,
-            is_set: bool,
-        };
-
-        const OptionFields = std.StringHashMap(OptionField);
-
         // `T` is a struct, which define options
-        fn init(allocator: std.mem.Allocator) anyerror!Self {
-            const option_type_info = @typeInfo(T);
-            if (option_type_info != .Struct) {
-                @compileError("option should be defined using struct, found " ++ @typeName(T));
-            }
-
-            var opts = OptionFields.init(allocator);
-            inline for (option_type_info.Struct.fields) |fld| {
-                const long_name = fld.name;
-                const opt_type = OptionType.from_zig_type(fld.field_type, false);
-                try opts.put(long_name, OptionField{
-                    .long_name = long_name,
-                    .opt_type = opt_type,
-                    .is_set = false,
-                });
-            }
-
-            // parse short names
-            if (@hasDecl(T, "__shorts__")) {
-                const shorts_type = @TypeOf(T.__shorts__);
-                if (@typeInfo(shorts_type) != .Struct) {
-                    @compileError("__shorts__ should be defined using struct, found " ++  @typeName(@typeInfo(shorts_type)));
-                }
-
-                inline for (std.meta.fields(shorts_type)) |fld| {
-                    const long_name = fld.name;
-                    var option = opts.getPtr(long_name) orelse {
-                        std.log.err("no such long option, value: {s}", .{long_name});
-                        return error.NoLongOtion;
-                    };
-
-                    const short_name = @field(T.__shorts__, long_name);
-                    if (@typeInfo(@TypeOf(short_name)) != .EnumLiteral) {
-                        @compileError("short option value must be literal enum, found " ++ @typeName(@typeInfo(@TypeOf(short_name))));
-                    }
-                    option.short_name = @tagName(short_name)[0];
-                }
-            }
-
-            // parse messages
-            if (@hasDecl(T, "__messages__")) {
-                const messages_type = @TypeOf(T.__messages__);
-                if (@typeInfo(messages_type) != .Struct) {
-                    @compileError("__messages__ should be defined using struct, found " ++  @typeName(@typeInfo(messages_type)));
-                }
-
-                inline for (std.meta.fields(messages_type)) |fld| {
-                    const long_name = fld.name;
-                    var option = opts.getPtr(long_name) orelse {
-                        std.log.err("no such long option, value: {s}", .{long_name});
-                        return error.NoLongOtion;
-                    };
-
-                    option.message =  @field(T.__messages__, long_name);
-                }
-            }
+        fn init(allocator: std.mem.Allocator, opt_fields: [std.meta.fields(T).len]OptionField) Self {
             return .{
                 .allocator = allocator,
-                .parsedOptions = opts,
+                .parsedOptions = opt_fields,
             };
         }
+
+        // State machine used to parse arguments. Available state transitions:
+        // 1. start -> args
+        // 2. start -> waitValue -> .. -> waitValue --> args -> ... -> args
+        // 3. start
 
         const ParseState = enum {
             start,
@@ -197,11 +260,11 @@ fn OptionParser(
             args,
         };
 
-        fn parse(self: *Self) OptionError!StructArguments(WithDefault(T)) {
+        fn parse(self: *Self) OptionError!StructArguments(T) {
             var args_iter = try std.process.argsWithAllocator(self.allocator);
             defer args_iter.deinit();
 
-            var result = StructArguments(WithDefault(T)){
+            var result = StructArguments(T){
                 .program = args_iter.next() orelse return error.NoProgram,
                 .allocator = self.allocator,
                 .args = WithDefault(T){},
@@ -210,7 +273,6 @@ fn OptionParser(
 
             var state = ParseState.start;
             var current_opt: ?*OptionField = null;
-
             while (args_iter.next()) |arg| {
                 std.log.debug("current state is: {s}", .{@tagName(state)});
 
@@ -223,29 +285,34 @@ fn OptionParser(
                             continue;
                         }
 
-                        current_opt = if (std.mem.startsWith(u8, arg[1..], "-"))
+                        if (std.mem.startsWith(u8, arg[1..], "-")) {
                             // long option
-                            self.parsedOptions.getPtr(arg[2..])
-                        else blk: {
-                            // short
+                            const long_name = arg[2..];
+                            for (self.parsedOptions) |*opt_fld| {
+                                if (std.mem.eql(u8, opt_fld.long_name, long_name)) {
+                                    current_opt = opt_fld;
+                                    break;
+                                }
+                            }
+                        } else {
+                            // short option
                             const short_name = arg[1..];
                             if (short_name.len != 1) {
                                 std.log.err("No such short option, name:{s}", .{arg});
                                 return error.NoShortOption;
                             }
-                            var it = self.parsedOptions.valueIterator();
-                            while (it.next()) |opt| {
-                                std.log.info("short arg is {s}-{any}", .{ short_name, opt.short_name });
+                            for (self.parsedOptions) |*opt| {
                                 if (opt.short_name) |name| {
                                     if (name == short_name[0]) {
-                                        break :blk opt;
+                                        current_opt = opt;
+                                        break;
                                     }
                                 }
                             }
-                        };
+                        }
 
                         var opt = current_opt orelse {
-                            std.log.err("No such option, name:{s}", .{arg});
+                            std.log.err("Current option is null, option_name:{s}", .{arg});
                             return error.NoLongOption;
                         };
 
@@ -272,8 +339,7 @@ fn OptionParser(
                 }
             }
 
-            var it = self.parsedOptions.valueIterator();
-            while (it.next()) |opt| {
+            inline for (self.parsedOptions) |opt| {
                 if (opt.opt_type.is_required() and !opt.is_set) {
                     std.log.err("Missing required option, name:{s}", .{opt.long_name});
                     return error.MissingRequiredOption;
@@ -283,14 +349,14 @@ fn OptionParser(
         }
 
         fn setOptionValue(opt: *WithDefault(T), comptime opt_name: []const u8, comptime opt_type: OptionType, raw_value: []const u8) !void {
-            const value = switch (opt_type) {
+            @field(opt, opt_name) =
+                switch (opt_type) {
                 .Int, .RequiredInt => try std.fmt.parseInt(i64, raw_value, 10),
                 .Float, .RequiredFloat => try std.fmt.parseFloat(f64, raw_value),
                 .String, .RequiredString => raw_value,
                 // bool require no parameter
                 .Bool, .RequiredBool => unreachable,
             };
-            @field(opt, opt_name) = value;
         }
     };
 }
