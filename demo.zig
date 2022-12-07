@@ -1,5 +1,5 @@
 const std = @import("std");
-const argsParser = @import("simargs");
+const simargs = @import("simargs");
 
 pub const log_level: std.log.Level = .info;
 
@@ -8,7 +8,7 @@ pub fn main() !void {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var opt = try argsParser.parse(allocator, struct {
+    var opt = try simargs.parse(allocator, struct {
         // Those fields declare arguments options
         // only `action` is required, others are all optional
         help: ?i64,

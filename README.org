@@ -13,7 +13,33 @@ A simple, opinionated, struct-based argument parser in Zig.
 * Usage
 See [[file:demo.zig]]
 
+#+begin_src bash :results verbatim :exports both
+# Run demo
+zig build && ./zig-out/bin/demo --action show-time 2>&1
+#+end_src
+
+#+RESULTS:
+#+begin_example
+info: program is ./zig-out/bin/demo
+info: option name:help, value:0
+info: option name:version, value:null
+info: option name:action, value:{ 115, 104, 111, 119, 45, 116, 105, 109, 101 }
+info: option name:name, value:{  }
+info: option name:age, value:3.0e+01
+ USAGE:
+     ./zig-out/bin/demo [OPTIONS] ...
+
+ OPTIONS:
+	-h, --help               show help
+	    --version
+	-a, --action             tell me what you want to do
+	    --name
+	    --age                How old are you
+#+end_example
+
 * Acknowledgment
+When implement =simargs=, I refer following projects to learn how to write
+idiomatic Zig code. Big Thanks!
 - [[https://github.com/MasterQ32/zig-args/][MasterQ32/zig-args: Simple-to-use argument parser with struct-based config]]
 - [[https://github.com/Hejsil/zig-clap][Hejsil/zig-clap: Simple command line argument parsing library]]
 - [[https://github.com/evangrayk/zig-argparse][evangrayk/zig-argparse: Command line argument parsing made easy in zig]]

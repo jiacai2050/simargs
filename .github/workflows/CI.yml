@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v2
       - uses: goto-bus-stop/setup-zig@v1
@@ -28,7 +28,8 @@ jobs:
         run: zig build run-demo
       - name: Memory leak detect
         run: |
-          zig build -Dcpu=baseline --verbose
+          sudo apt update && sudo apt install -y valgrind
+          zig build --verbose
           TEST_BINARY=./zig-out/bin/demo
           valgrind --leak-check=full --tool=memcheck \
           --show-leak-kinds=all --error-exitcode=1 ${TEST_BINARY} --action eat
