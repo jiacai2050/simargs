@@ -5,12 +5,13 @@ const CliOption = struct {
     help: ?i64,
     version: ?bool,
     action: []const u8,
+    name: ?[]const u8,
     age: ?f64,
 
-    // const __shorts__ = .{
-    //     .help = .h,
-    //     .version = .v,
-    // };
+    pub const __shorts__ = .{
+        .help = .h,
+        .action = .a,
+    };
 
     // const __messages__ = .{
     //     .help = "show help",
@@ -28,5 +29,6 @@ pub fn main() !void {
     var opt = try argsParser.parse(allocator, CliOption);
     defer opt.deinit();
 
-    std.log.info("opt is [{s}]", .{opt.args.action});
+    std.log.info("opt is [{s}-{?}]", .{ opt.args.action, opt.args.age });
+    std.log.info("opt is [{any}]", .{opt.args.name});
 }

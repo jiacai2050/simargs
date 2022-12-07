@@ -10,18 +10,17 @@ const OptionError = ParseError || std.mem.Allocator.Error || std.fmt.ParseIntErr
 pub fn parse(
     allocator: std.mem.Allocator,
     comptime T: type,
-) !StructArguments(TWithDefaultValue(T)) {
-    const new_T = TWithDefaultValue(T);
-    var parser = try OptionParser(new_T).init(allocator);
+) !StructArguments(WithDefault(T)) {
+    var parser = try OptionParser(T).init(allocator);
     return parser.parse();
 }
 
 fn StructArguments(comptime T: type) type {
     return struct {
         program: []const u8,
-        allocator: std.mem.Allocator,
         args: T,
         positional_args: std.ArrayList([]const u8),
+        allocator: std.mem.Allocator,
 
         pub fn deinit(self: @This()) void {
             self.allocator.free(self.program);
@@ -30,7 +29,7 @@ fn StructArguments(comptime T: type) type {
     };
 }
 
-fn TWithDefaultValue(comptime T: type) type {
+fn WithDefault(comptime T: type) type {
     const type_info = @typeInfo(T);
     if (type_info != .Struct) {
         @compileError("option should be defined using struct, found " ++ @typeName(T));
@@ -59,13 +58,17 @@ fn TWithDefaultValue(comptime T: type) type {
         new_fields[i].default_value = @ptrCast(*const anyopaque, &default_value);
     }
 
-    return @Type(.{ .Struct = .{
-        .layout = struct_info.layout,
-        .backing_integer = struct_info.backing_integer,
-        .decls = struct_info.decls,
-        .is_tuple = struct_info.is_tuple,
-        .fields = new_fields[0..],
-    } });
+    return @Type(.{
+        .Struct = .{
+            .layout = struct_info.layout,
+            .backing_integer = struct_info.backing_integer,
+            .decls = &.{},
+            // error: reified structs must have no decls
+            // .decls = struct_info.decls,
+            .is_tuple = struct_info.is_tuple,
+            .fields = new_fields[0..],
+        },
+    });
 }
 
 const OptionType = enum(u32) {
@@ -114,13 +117,6 @@ fn OptionParser(
         allocator: std.mem.Allocator,
 
         const Self = @This();
-
-        // const OptionValue = union(enum) {
-        //     int: i64,
-        //     float: f64,
-        //     string: [:0]const u8,
-        //     boolean: bool,
-        // };
 
         const OptionField = struct {
             long_name: []const u8,
@@ -184,14 +180,14 @@ fn OptionParser(
             args,
         };
 
-        fn parse(self: *Self) OptionError!StructArguments(T) {
+        fn parse(self: *Self) OptionError!StructArguments(WithDefault(T)) {
             var args_iter = try std.process.argsWithAllocator(self.allocator);
             defer args_iter.deinit();
 
-            var result = StructArguments(T){
+            var result = StructArguments(WithDefault(T)){
                 .program = args_iter.next() orelse return error.NoProgram,
                 .allocator = self.allocator,
-                .args = T{},
+                .args = WithDefault(T){},
                 .positional_args = std.ArrayList([]const u8).init(self.allocator),
             };
 
@@ -202,19 +198,27 @@ fn OptionParser(
                 std.log.debug("current state is: {s}", .{@tagName(state)});
 
                 switch (state) {
-                    .start => if (std.mem.startsWith(u8, arg, "-")) {
-                        current_opt = if (std.mem.startsWith(u8, arg[1..arg.len], "-"))
+                    .start => {
+                        if (!std.mem.startsWith(u8, arg, "-")) {
+                            // no option any more, the rest are positional args
+                            state = .args;
+                            try result.positional_args.append(arg);
+                            continue;
+                        }
+
+                        current_opt = if (std.mem.startsWith(u8, arg[1..], "-"))
                             // long option
-                            self.parsedOptions.getPtr(arg[2..arg.len])
+                            self.parsedOptions.getPtr(arg[2..])
                         else blk: {
                             // short
-                            const short_name = arg[1..arg.len];
+                            const short_name = arg[1..];
                             if (short_name.len != 1) {
                                 std.log.err("No such short option, name:{s}", .{arg});
                                 return error.NoShortOption;
                             }
                             var it = self.parsedOptions.valueIterator();
                             while (it.next()) |opt| {
+                                std.log.info("short arg is {s}-{any}", .{ short_name, opt.short_name });
                                 if (opt.short_name) |name| {
                                     if (name == short_name[0]) {
                                         break :blk opt;
@@ -235,10 +239,6 @@ fn OptionParser(
                             // value required, parse option value
                             state = .waitValue;
                         }
-                    } else {
-                        // no option any more, the rest are positional args
-                        state = .args;
-                        try result.positional_args.append(arg);
                     },
                     .args => try result.positional_args.append(arg),
                     .waitValue => {
@@ -265,12 +265,13 @@ fn OptionParser(
             return result;
         }
 
-        fn setOptionValue(opt: *T, comptime opt_name: []const u8, comptime opt_type: OptionType, raw_value: []const u8) !void {
+        fn setOptionValue(opt: *WithDefault(T), comptime opt_name: []const u8, comptime opt_type: OptionType, raw_value: []const u8) !void {
             const value = switch (opt_type) {
                 .Int, .RequiredInt => try std.fmt.parseInt(i64, raw_value, 10),
                 .Float, .RequiredFloat => try std.fmt.parseFloat(f64, raw_value),
                 .String, .RequiredString => raw_value,
-                .Bool, .RequiredBool => std.mem.eql(u8, "true", raw_value) or std.mem.eql(u8, "1", raw_value),
+                // bool require no parameter
+                .Bool, .RequiredBool => unreachable,
             };
             @field(opt, opt_name) = value;
         }
