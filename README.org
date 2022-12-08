@@ -15,7 +15,7 @@ See [[file:demo.zig]]
 
 #+begin_src bash :results verbatim :exports both
 # Run demo
-zig build && ./zig-out/bin/demo --output /tmp/a.out 2>&1
+zig build && ./zig-out/bin/demo --output /tmp/a.out hello world 2>&1
 #+end_src
 
 #+RESULTS:
@@ -23,10 +23,12 @@ zig build && ./zig-out/bin/demo --output /tmp/a.out 2>&1
 info: Program: ./zig-out/bin/demo
 info: Arguments:-----------------
 info: option name:verbose, value:null
-info: option name:user-agent, value:{  }
-info: option name:timeout, value:3.0e+01
+info: option name:user-agent, value:null
+info: option name:timeout, value:null
 info: option name:output, value:{ 47, 116, 109, 112, 47, 97, 46, 111, 117, 116 }
 info: Positional arguments: -----------------
+info: hello
+info: world
 info: A print_help() method is provided-----------------
  USAGE:
      ./zig-out/bin/demo [OPTIONS] ...
@@ -41,6 +43,6 @@ info: A print_help() method is provided-----------------
 * Acknowledgment
 When implement =simargs=, I refer following projects to learn how to write
 idiomatic Zig code. Big Thanks!
-- [[https://github.com/MasterQ32/zig-args/][MasterQ32/zig-args: Simple-to-use argument parser with struct-based config]]
-- [[https://github.com/Hejsil/zig-clap][Hejsil/zig-clap: Simple command line argument parsing library]]
-- [[https://github.com/evangrayk/zig-argparse][evangrayk/zig-argparse: Command line argument parsing made easy in zig]]
+- [[https://github.com/MasterQ32/zig-args/][MasterQ32/zig-args]]
+- [[https://github.com/Hejsil/zig-clap][Hejsil/zig-clap]]
+- [[https://github.com/evangrayk/zig-argparse][evangrayk/zig-argparse]]

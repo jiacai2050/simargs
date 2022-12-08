@@ -25,7 +25,7 @@ jobs:
         with:
           version: master
       - name: Run demo
-        run: zig build run-demo -- -o /tmp/simargs.txt
+        run: zig build run-demo -- -o /tmp/simargs.txt hello world
       - name: Memory leak detect
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -33,4 +33,5 @@ jobs:
           zig build -Dcpu=baseline --verbose
           TEST_BINARY=./zig-out/bin/demo
           valgrind --leak-check=full --tool=memcheck \
-          --show-leak-kinds=all --error-exitcode=1 ${TEST_BINARY} --output a.out
+          --show-leak-kinds=all --error-exitcode=1 ${TEST_BINARY} --output a.out \
+          hello world
