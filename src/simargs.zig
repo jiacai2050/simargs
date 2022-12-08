@@ -3,14 +3,16 @@
 const std = @import("std");
 const testing = std.testing;
 
-const ParseError = error{ NoProgram, NoLongOption, ExpectedOption, NoShortOption, MissingRequiredOption };
+const ParseError = error{ NoProgram, NoLongOption, NoShortOption, MissingRequiredOption };
 
 const OptionError = ParseError || std.mem.Allocator.Error || std.fmt.ParseIntError || std.fmt.ParseFloatError;
 
+/// Parses arguments according to the given structure.
+/// - `T` is the configuration of the arguments.
 pub fn parse(
     allocator: std.mem.Allocator,
     comptime T: type,
-) !StructArguments(T) {
+) OptionError!StructArguments(T) {
     var parser = OptionParser(T).init(allocator, comptime parseOptionFields(T));
     return parser.parse();
 }
@@ -24,7 +26,9 @@ fn parseOptionFields(comptime T: type) [std.meta.fields(T).len]OptionField {
     var opt_fields: [std.meta.fields(T).len]OptionField = undefined;
     inline for (option_type_info.Struct.fields) |fld, idx| {
         const long_name = fld.name;
-        const opt_type = OptionType.from_zig_type(fld.field_type, false);
+        const opt_type = OptionType.from_zig_type(
+            fld.field_type,
+        );
         opt_fields[idx] = .{
             .long_name = long_name,
             .opt_type = opt_type,
@@ -113,7 +117,7 @@ fn StructArguments(comptime T: type) type {
             try buf.append(header);
             // TODO: Maybe be too small(or big)?
             const msg_offset = 25;
-            for (fields) |fld| {
+            inline for (fields) |fld| {
                 var line_buf = std.ArrayList([]const u8).init(self.allocator);
                 try line_buf.append("\t");
                 if (fld.short_name) |sn| {
@@ -134,7 +138,9 @@ fn StructArguments(comptime T: type) type {
 
                 if (fld.message) |msg| {
                     try line_buf.append(msg);
+                    try line_buf.append(" ");
                 }
+                try line_buf.append(fld.opt_type.as_string());
                 const line = try std.mem.join(self.allocator, "", line_buf.items);
                 try buf.append(line);
             }
@@ -146,23 +152,30 @@ fn StructArguments(comptime T: type) type {
 
 const OptionType = enum(u32) {
     const REQUIRED_VERSION_SHIFT = 16;
+    const Self = @This();
 
     RequiredInt,
     RequiredBool,
     RequiredFloat,
     RequiredString,
 
-    Int = @This().REQUIRED_VERSION_SHIFT,
+    Int = Self.REQUIRED_VERSION_SHIFT,
     Bool,
     Float,
     String,
 
-    fn from_zig_type(comptime T: type, comptime is_optional: bool) OptionType {
-        const base_type: @This() = switch (@typeInfo(T)) {
+    fn from_zig_type(
+        comptime T: type,
+    ) OptionType {
+        return Self.convert(T, false);
+    }
+
+    fn convert(comptime T: type, comptime is_optional: bool) OptionType {
+        const base_type: Self = switch (@typeInfo(T)) {
             .Int => .RequiredInt,
             .Bool => .RequiredBool,
             .Float => .RequiredFloat,
-            .Optional => |opt_info| return from_zig_type(opt_info.child, true),
+            .Optional => |opt_info| return Self.convert(opt_info.child, true),
             .Pointer => |ptr_info|
             // only support []const u8
             if (ptr_info.size == .Slice and ptr_info.child == u8 and ptr_info.is_const)
@@ -177,8 +190,21 @@ const OptionType = enum(u32) {
         return @intToEnum(@This(), @enumToInt(base_type) + if (is_optional) @This().REQUIRED_VERSION_SHIFT else 0);
     }
 
-    fn is_required(self: @This()) bool {
+    fn is_required(self: Self) bool {
         return @enumToInt(self) < REQUIRED_VERSION_SHIFT;
+    }
+
+    fn as_string(self: Self) []const u8 {
+        return switch (self) {
+            .Int => "[type: integer]",
+            .RequiredInt => "[type: integer][REQUIRED]",
+            .Bool => "[type: bool]",
+            .RequiredBool => "[type: bool][REQUIRED]",
+            .Float => "[type: float]",
+            .RequiredFloat => "[type: float][REQUIRED]",
+            .String => "[type: string]",
+            .RequiredString => "[type: string][REQUIRED]",
+        };
     }
 };
 
@@ -194,7 +220,7 @@ fn OptionParser(
     comptime T: type,
 ) type {
     return struct {
-        parsedOptions: [std.meta.fields(T).len]OptionField,
+        opt_fields: [std.meta.fields(T).len]OptionField,
         allocator: std.mem.Allocator,
 
         const Self = @This();
@@ -203,7 +229,7 @@ fn OptionParser(
         fn init(allocator: std.mem.Allocator, opt_fields: [std.meta.fields(T).len]OptionField) Self {
             return .{
                 .allocator = allocator,
-                .parsedOptions = opt_fields,
+                .opt_fields = opt_fields,
             };
         }
 
@@ -229,8 +255,14 @@ fn OptionParser(
                 .positional_args = std.ArrayList([]const u8).init(self.allocator),
             };
             comptime inline for (std.meta.fields(T)) |fld| {
-                if (!OptionType.from_zig_type(fld.field_type, false).is_required()) {
-                    @field(result.args, fld.name) = null;
+                if (!OptionType.from_zig_type(fld.field_type).is_required()) {
+                    if (fld.default_value) |v| {
+                        // https://github.com/ziglang/zig/blob/d69e97ae1677ca487833caf6937fa428563ed0ae/lib/std/json.zig#L1590
+                        // why align(1) is used here?
+                        @field(result.args, fld.name) = @ptrCast(*align(1) const fld.field_type, v).*;
+                    } else {
+                        @field(result.args, fld.name) = null;
+                    }
                 }
             };
 
@@ -251,7 +283,7 @@ fn OptionParser(
                         if (std.mem.startsWith(u8, arg[1..], "-")) {
                             // long option
                             const long_name = arg[2..];
-                            for (self.parsedOptions) |*opt_fld| {
+                            for (self.opt_fields) |*opt_fld| {
                                 if (std.mem.eql(u8, opt_fld.long_name, long_name)) {
                                     current_opt = opt_fld;
                                     break;
@@ -264,7 +296,7 @@ fn OptionParser(
                                 std.log.err("No such short option, name:{s}", .{arg});
                                 return error.NoShortOption;
                             }
-                            for (self.parsedOptions) |*opt| {
+                            for (self.opt_fields) |*opt| {
                                 if (opt.short_name) |name| {
                                     if (name == short_name[0]) {
                                         current_opt = opt;
@@ -292,7 +324,7 @@ fn OptionParser(
                         var opt = current_opt orelse unreachable;
                         inline for (std.meta.fields(T)) |field| {
                             if (std.mem.eql(u8, field.name, opt.long_name)) {
-                                try Self.setOptionValue(&result.args, field.name, OptionType.from_zig_type(field.field_type, false), arg);
+                                try Self.setOptionValue(&result.args, field.name, field.field_type, arg);
                                 opt.is_set = true;
                                 break;
                             }
@@ -302,7 +334,7 @@ fn OptionParser(
                 }
             }
 
-            inline for (self.parsedOptions) |opt| {
+            inline for (self.opt_fields) |opt| {
                 if (opt.opt_type.is_required()) {
                     if (!opt.is_set) {
                         std.log.err("Missing required option, name:{s}", .{opt.long_name});
@@ -313,11 +345,32 @@ fn OptionParser(
             return result;
         }
 
-        fn setOptionValue(opt: *T, comptime opt_name: []const u8, comptime opt_type: OptionType, raw_value: []const u8) !void {
+        fn getSignedness(comptime opt_type: type) std.builtin.Signedness {
+            return switch (@typeInfo(opt_type)) {
+                .Int => |i| i.signedness,
+                .Optional => |o| Self.getSignedness(o.child),
+                else => @compileError("not int type, have no signedness"),
+            };
+        }
+
+        fn getRealType(comptime opt_type: type) type {
+            return switch (@typeInfo(opt_type)) {
+                .Optional => |o| Self.getRealType(o.child),
+                else => opt_type,
+            };
+        }
+
+        fn setOptionValue(opt: *T, comptime opt_name: []const u8, comptime opt_type: type, raw_value: []const u8) !void {
             @field(opt, opt_name) =
-                switch (opt_type) {
-                .Int, .RequiredInt => try std.fmt.parseInt(i64, raw_value, 10),
-                .Float, .RequiredFloat => try std.fmt.parseFloat(f64, raw_value),
+                switch (comptime OptionType.from_zig_type(opt_type)) {
+                .Int, .RequiredInt => blk: {
+                    const real_type = comptime Self.getRealType(opt_type);
+                    break :blk switch (Self.getSignedness(opt_type)) {
+                        .signed => try std.fmt.parseInt(real_type, raw_value, 0),
+                        .unsigned => try std.fmt.parseUnsigned(real_type, raw_value, 0),
+                    };
+                },
+                .Float, .RequiredFloat => try std.fmt.parseFloat(opt_type, raw_value),
                 .String, .RequiredString => raw_value,
                 // bool require no parameter
                 .Bool, .RequiredBool => unreachable,

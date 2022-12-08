@@ -8,8 +8,15 @@
 
 [[https://github.com/jiacai2050/simargs/actions/workflows/CI.yml][https://github.com/jiacai2050/simargs/actions/workflows/CI.yml/badge.svg]]
 
-A simple, opinionated, struct-based argument parser in Zig.
+A simple, opinionated, struct-based argument parser in Zig, taking full advantage of =comptime=.
 
+* Features
+- Supported data type:
+  - All [[https://ziglang.org/documentation/master/#Primitive-Types][primitive types]], such as =i8=, =usize=
+  - =[]const u8=
+- =Optionals= means this field is an optional argument
+- Use =comptime= as possible as I can
+- Provide =print_help()= out of box
 * Usage
 See [[file:demo.zig]]
 
@@ -24,7 +31,7 @@ info: Program: ./zig-out/bin/demo
 info: Arguments:-----------------
 info: option name:verbose, value:null
 info: option name:user-agent, value:null
-info: option name:timeout, value:null
+info: option name:timeout, value:30
 info: option name:output, value:{ 47, 116, 109, 112, 47, 97, 46, 111, 117, 116 }
 info: Positional arguments: -----------------
 info: hello
@@ -34,11 +41,20 @@ info: A print_help() method is provided-----------------
      ./zig-out/bin/demo [OPTIONS] ...
 
  OPTIONS:
-	-v, --verbose            Make the operation more talkative
-	-A, --user-agent
-	    --timeout            Max time this request can cost
-	-o, --output             Write to file instead of stdout
+	-v, --verbose            Make the operation more talkative [type: bool]
+	-A, --user-agent         [type: string]
+	    --timeout            Max time this request can cost [type: integer]
+	-o, --output             Write to file instead of stdout [type: string][REQUIRED]
 #+end_example
+* Install
+Add =simargs= to your projects via submodule, and in =build.zig= add
+#+begin_src zig
+exe.addPackagePath("simargs", "libs/simargs/src/simargs.zig");
+#+end_src
+Then import like this in your Zig code:
+#+begin_src zig
+const simargs = @import("simargs");
+#+end_src
 
 * Acknowledgment
 When implement =simargs=, I refer following projects to learn how to write

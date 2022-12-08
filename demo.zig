@@ -13,7 +13,7 @@ pub fn main() !void {
         // only `output` is required, others are all optional
         verbose: ?bool,
         @"user-agent": ?[]const u8,
-        timeout: ?f64 = 30, // default value
+        timeout: ?u16 = 30, // default value
         output: []const u8,
 
         // This declares option's short name
