@@ -10,33 +10,39 @@ pub fn main() !void {
 
     var opt = try simargs.parse(allocator, struct {
         // Those fields declare arguments options
-        // only `action` is required, others are all optional
-        help: ?i64,
-        version: ?bool,
-        action: []const u8,
-        name: ?[]const u8,
-        age: ?f64 = 30, // default value
+        // only `output` is required, others are all optional
+        verbose: ?bool,
+        @"user-agent": ?[]const u8,
+        timeout: ?f64 = 30, // default value
+        output: []const u8,
 
         // This declares option's short name
         pub const __shorts__ = .{
-            .help = .h,
-            .action = .a,
+            .verbose = .v,
+            .output = .o,
+            .@"user-agent" = .A,
         };
 
         // This declares option's help message
         pub const __messages__ = .{
-            .help = "show help", //
-            .action = "tell me what you want to do", //
-            .age = "How old are you",
+            .verbose = "Make the operation more talkative", //
+            .output = "Write to file instead of stdout", //
+            .timeout = "Max time this request can cost",
         };
     });
     defer opt.deinit();
 
-    std.log.info("program is {s}", .{opt.program});
+    std.log.info("Program: {s}", .{opt.program});
+    std.log.info("Arguments:-----------------", .{});
     inline for (std.meta.fields(@TypeOf(opt.args))) |fld| {
         std.log.info("option name:{s}, value:{any}", .{ fld.name, @field(opt.args, fld.name) });
     }
+    std.log.info("Positional arguments: -----------------", .{});
+    for (opt.positional_args.items) |arg| {
+        std.log.info("{s}", .{arg});
+    }
 
     // Provide a print_help util method
+    std.log.info("A print_help() method is provided-----------------", .{});
     try opt.print_help();
 }

@@ -83,7 +83,7 @@ fn parseOptionFields(comptime T: type) [std.meta.fields(T).len]OptionField {
 fn StructArguments(comptime T: type) type {
     return struct {
         program: []const u8,
-        args: WithDefault(T),
+        args: T,
         positional_args: std.ArrayList([]const u8),
         allocator: std.mem.Allocator,
 
@@ -142,48 +142,6 @@ fn StructArguments(comptime T: type) type {
             try w.writeAll(try std.mem.join(self.allocator, "\n", buf.items));
         }
     };
-}
-
-fn WithDefault(comptime T: type) type {
-    const type_info = @typeInfo(T);
-    if (type_info != .Struct) {
-        @compileError("option should be defined using struct, found " ++ @typeName(T));
-    }
-
-    const struct_info = type_info.Struct;
-    var new_fields: [struct_info.fields.len]std.builtin.Type.StructField = undefined;
-    inline for (std.meta.fields(T)) |field, i| {
-        new_fields[i].name = field.name;
-        new_fields[i].field_type = field.field_type;
-        new_fields[i].is_comptime = field.is_comptime;
-        new_fields[i].alignment = field.alignment;
-        new_fields[i].name = field.name;
-
-        if (field.default_value) |v| {
-            new_fields[i].default_value = v;
-            continue;
-        }
-
-        const default_value = switch (OptionType.from_zig_type(field.field_type, false)) {
-            .Int, .RequiredInt => @as(field.field_type, 0),
-            .Float, .RequiredFloat => @as(field.field_type, 0.0),
-            .String, .RequiredString => @as([]const u8, &[_]u8{}),
-            .Bool, .RequiredBool => false,
-        };
-        new_fields[i].default_value = @ptrCast(*const anyopaque, &default_value);
-    }
-
-    return @Type(.{
-        .Struct = .{
-            .layout = struct_info.layout,
-            .backing_integer = struct_info.backing_integer,
-            .decls = &.{},
-            // error: reified structs must have no decls
-            // .decls = struct_info.decls,
-            .is_tuple = struct_info.is_tuple,
-            .fields = new_fields[0..],
-        },
-    });
 }
 
 const OptionType = enum(u32) {
@@ -267,8 +225,13 @@ fn OptionParser(
             var result = StructArguments(T){
                 .program = args_iter.next() orelse return error.NoProgram,
                 .allocator = self.allocator,
-                .args = WithDefault(T){},
+                .args = undefined,
                 .positional_args = std.ArrayList([]const u8).init(self.allocator),
+            };
+            comptime inline for (std.meta.fields(T)) |fld| {
+                if (!OptionType.from_zig_type(fld.field_type, false).is_required()) {
+                    @field(result.args, fld.name) = null;
+                }
             };
 
             var state = ParseState.start;
@@ -340,15 +303,17 @@ fn OptionParser(
             }
 
             inline for (self.parsedOptions) |opt| {
-                if (opt.opt_type.is_required() and !opt.is_set) {
-                    std.log.err("Missing required option, name:{s}", .{opt.long_name});
-                    return error.MissingRequiredOption;
+                if (opt.opt_type.is_required()) {
+                    if (!opt.is_set) {
+                        std.log.err("Missing required option, name:{s}", .{opt.long_name});
+                        return error.MissingRequiredOption;
+                    }
                 }
             }
             return result;
         }
 
-        fn setOptionValue(opt: *WithDefault(T), comptime opt_name: []const u8, comptime opt_type: OptionType, raw_value: []const u8) !void {
+        fn setOptionValue(opt: *T, comptime opt_name: []const u8, comptime opt_type: OptionType, raw_value: []const u8) !void {
             @field(opt, opt_name) =
                 switch (opt_type) {
                 .Int, .RequiredInt => try std.fmt.parseInt(i64, raw_value, 10),
