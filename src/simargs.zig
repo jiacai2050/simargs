@@ -87,6 +87,37 @@ fn parseOptionFields(comptime T: type) [std.meta.fields(T).len]OptionField {
     return opt_fields;
 }
 
+test "parseOptionFields" {
+    const fields = comptime parseOptionFields(struct {
+        verbose: bool,
+        help: ?bool,
+        timeout: u16,
+        @"user-agent": ?[]const u8,
+
+        pub const __shorts__ = .{
+            .verbose = .v,
+        };
+
+        pub const __messages__ = .{
+            .verbose = "show verbose log",
+        };
+    });
+
+    try std.testing.expectEqual(4, fields.len);
+    const first_opt = OptionField{ .long_name = "verbose", .short_name = 'v', .message = "show verbose log", .opt_type = .RequiredBool };
+    try std.testing.expectEqualStrings(first_opt.long_name, fields[0].long_name);
+    try std.testing.expectEqual(first_opt.message, fields[0].message);
+    try std.testing.expectEqual(first_opt.short_name, fields[0].short_name);
+    try std.testing.expectEqual(first_opt.opt_type, fields[0].opt_type);
+    try std.testing.expectEqual(first_opt.is_set, fields[0].is_set);
+    const last_opt = OptionField{ .long_name = "user-agent", .opt_type = .String };
+    try std.testing.expectEqualStrings(last_opt.long_name, fields[3].long_name);
+    try std.testing.expectEqual(last_opt.message, fields[3].message);
+    try std.testing.expectEqual(last_opt.short_name, fields[3].short_name);
+    try std.testing.expectEqual(last_opt.opt_type, fields[3].opt_type);
+    try std.testing.expectEqual(last_opt.is_set, fields[3].is_set);
+}
+
 fn StructArguments(comptime T: type) type {
     return struct {
         program: []const u8,
@@ -227,12 +258,19 @@ const OptionType = enum(u32) {
     }
 };
 
+test "OptionTypeParsing" {
+    try std.testing.expectEqual(OptionType.RequiredInt, comptime OptionType.from_zig_type(i32));
+    try std.testing.expectEqual(OptionType.Int, comptime OptionType.from_zig_type(?i32));
+    try std.testing.expectEqual(OptionType.RequiredString, comptime OptionType.from_zig_type([]const u8));
+    try std.testing.expectEqual(OptionType.String, comptime OptionType.from_zig_type(?[]const u8));
+}
+
 const OptionField = struct {
     long_name: []const u8,
     short_name: ?u8 = null,
     message: ?[]const u8 = null,
     opt_type: OptionType,
-    is_set: bool,
+    is_set: bool = false,
 };
 
 fn OptionParser(
@@ -246,7 +284,7 @@ fn OptionParser(
         const Self = @This();
 
         // `T` is a struct, which define options
-        fn init(allocator: std.mem.Allocator, opt_fields: [std.meta.fields(T).len]OptionField, args: [][:0]u8) Self {
+        fn init(allocator: std.mem.Allocator, opt_fields: [std.meta.fields(T).len]OptionField, args: [][]const u8) Self {
             return .{
                 .allocator = allocator,
                 .opt_fields = opt_fields,
@@ -270,12 +308,15 @@ fn OptionParser(
             if (self.args.len == 0) {
                 return error.NoProgram;
             }
+
             var result = StructArguments(T){
                 .program = try self.allocator.dupe(u8, self.args[0]),
                 .allocator = self.allocator,
                 .args = undefined,
                 .positional_args = std.ArrayList([]const u8).init(self.allocator),
             };
+            errdefer self.allocator.free(result.program);
+
             comptime inline for (std.meta.fields(T)) |fld| {
                 if (!OptionType.from_zig_type(fld.field_type).is_required()) {
                     if (fld.default_value) |v| {
@@ -343,7 +384,12 @@ fn OptionParser(
                             state = .waitValue;
                         }
                     },
-                    .args => try result.positional_args.append(try self.allocator.dupe(u8, arg)),
+                    .args => {
+                        const v = try self.allocator.dupe(u8, arg);
+                        errdefer self.allocator.free(v);
+
+                        try result.positional_args.append(v);
+                    },
                     .waitBoolValue => {
                         var opt = current_opt.?;
                         var raw_value = arg;
@@ -425,4 +471,21 @@ fn OptionParser(
             return false;
         }
     };
+}
+
+test "OptionParserNormalCase" {
+    const T = struct {
+        verbose: bool,
+        help: ?bool,
+        timeout: u16,
+        @"user-agent": ?[]const u8,
+
+        pub const __shorts__ = .{
+            .verbose = .v,
+        };
+    };
+    var args = [_][]const u8{ "abc", "dddd" };
+    var parser = OptionParser(T).init(std.testing.allocator, comptime parseOptionFields(T), args[0..]);
+
+    try std.testing.expectError(error.MissingRequiredOption, parser.parse());
 }
