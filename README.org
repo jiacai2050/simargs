@@ -16,7 +16,7 @@ A simple, opinionated, struct-based argument parser in Zig, taking full advantag
   - =[]const u8=
 - =Optionals= means this field is an optional argument
 - Use =comptime= as possible as I can
-- Provide =print_help()= out of box
+- Provide =print_help()= out of the box
 * Usage
 See [[file:demo.zig]]
 

@@ -3,7 +3,7 @@
 const std = @import("std");
 const testing = std.testing;
 
-const ParseError = error{ NoProgram, NoLongOption, NoShortOption, MissingRequiredOption };
+const ParseError = error{ NoProgram, NoLongOption, NoShortOption, MissingRequiredOption, OptionValueNotSet };
 
 const OptionError = ParseError || std.mem.Allocator.Error || std.fmt.ParseIntError || std.fmt.ParseFloatError;
 
@@ -13,7 +13,10 @@ pub fn parse(
     allocator: std.mem.Allocator,
     comptime T: type,
 ) OptionError!StructArguments(T) {
-    var parser = OptionParser(T).init(allocator, comptime parseOptionFields(T));
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
+
+    var parser = OptionParser(T).init(allocator, comptime parseOptionFields(T), args);
     return parser.parse();
 }
 
@@ -93,7 +96,23 @@ fn StructArguments(comptime T: type) type {
 
         pub fn deinit(self: @This()) void {
             self.allocator.free(self.program);
+
+            for (self.positional_args.items) |arg| {
+                self.allocator.free(arg);
+            }
             self.positional_args.deinit();
+
+            inline for (std.meta.fields(T)) |field| {
+                const opt_type = comptime OptionType.from_zig_type(field.field_type);
+                if (.RequiredString == opt_type) {
+                    self.allocator.free(@field(self.args, field.name));
+                }
+                if (.String == opt_type) {
+                    if (@field(self.args, field.name)) |v| {
+                        self.allocator.free(v);
+                    }
+                }
+            }
         }
 
         pub fn print_help(
@@ -222,14 +241,16 @@ fn OptionParser(
     return struct {
         opt_fields: [std.meta.fields(T).len]OptionField,
         allocator: std.mem.Allocator,
+        args: [][]const u8,
 
         const Self = @This();
 
         // `T` is a struct, which define options
-        fn init(allocator: std.mem.Allocator, opt_fields: [std.meta.fields(T).len]OptionField) Self {
+        fn init(allocator: std.mem.Allocator, opt_fields: [std.meta.fields(T).len]OptionField, args: [][:0]u8) Self {
             return .{
                 .allocator = allocator,
                 .opt_fields = opt_fields,
+                .args = args,
             };
         }
 
@@ -241,15 +262,16 @@ fn OptionParser(
         const ParseState = enum {
             start,
             waitValue,
+            waitBoolValue,
             args,
         };
 
         fn parse(self: *Self) OptionError!StructArguments(T) {
-            var args_iter = try std.process.argsWithAllocator(self.allocator);
-            defer args_iter.deinit();
-
+            if (self.args.len == 0) {
+                return error.NoProgram;
+            }
             var result = StructArguments(T){
-                .program = args_iter.next() orelse return error.NoProgram,
+                .program = try self.allocator.dupe(u8, self.args[0]),
                 .allocator = self.allocator,
                 .args = undefined,
                 .positional_args = std.ArrayList([]const u8).init(self.allocator),
@@ -268,7 +290,11 @@ fn OptionParser(
 
             var state = ParseState.start;
             var current_opt: ?*OptionField = null;
-            while (args_iter.next()) |arg| {
+
+            var arg_idx: usize = 1;
+            while (arg_idx < self.args.len) {
+                const arg = self.args[arg_idx];
+                arg_idx += 1;
                 std.log.debug("current state is: {s}", .{@tagName(state)});
 
                 switch (state) {
@@ -276,7 +302,7 @@ fn OptionParser(
                         if (!std.mem.startsWith(u8, arg, "-")) {
                             // no option any more, the rest are positional args
                             state = .args;
-                            try result.positional_args.append(arg);
+                            arg_idx -= 1;
                             continue;
                         }
 
@@ -311,27 +337,41 @@ fn OptionParser(
                             return error.NoLongOption;
                         };
 
-                        if (opt.opt_type == .Bool or opt.opt_type == .RequiredBool) { // no value required, parse next option
-                            opt.is_set = true;
-                            state = .start;
+                        if (opt.opt_type == .Bool or opt.opt_type == .RequiredBool) {
+                            state = .waitBoolValue;
                         } else {
-                            // value required, parse option value
                             state = .waitValue;
                         }
                     },
-                    .args => try result.positional_args.append(arg),
-                    .waitValue => {
-                        var opt = current_opt orelse unreachable;
-                        inline for (std.meta.fields(T)) |field| {
-                            if (std.mem.eql(u8, field.name, opt.long_name)) {
-                                try Self.setOptionValue(&result.args, field.name, field.field_type, arg);
-                                opt.is_set = true;
-                                break;
-                            }
+                    .args => try result.positional_args.append(try self.allocator.dupe(u8, arg)),
+                    .waitBoolValue => {
+                        var opt = current_opt.?;
+                        var raw_value = arg;
+                        // meet next option name, set current option value to true directly
+                        if (std.mem.startsWith(u8, arg, "-")) {
+                            // push back current arg
+                            arg_idx -= 1;
+                            raw_value = "true";
                         }
+                        opt.is_set = try self.setOptionValue(&result.args, opt.long_name, raw_value);
+                        state = .start;
+                    },
+                    .waitValue => {
+                        var opt = current_opt.?;
+                        opt.is_set = try self.setOptionValue(&result.args, opt.long_name, arg);
                         state = .start;
                     },
                 }
+            }
+
+            switch (state) {
+                // normal exit state
+                .start, .args => {},
+                .waitBoolValue => {
+                    var opt = current_opt.?;
+                    opt.is_set = try self.setOptionValue(&result.args, opt.long_name, "true");
+                },
+                .waitValue => return error.OptionValueNotSet,
             }
 
             inline for (self.opt_fields) |opt| {
@@ -360,21 +400,29 @@ fn OptionParser(
             };
         }
 
-        fn setOptionValue(opt: *T, comptime opt_name: []const u8, comptime opt_type: type, raw_value: []const u8) !void {
-            @field(opt, opt_name) =
-                switch (comptime OptionType.from_zig_type(opt_type)) {
-                .Int, .RequiredInt => blk: {
-                    const real_type = comptime Self.getRealType(opt_type);
-                    break :blk switch (Self.getSignedness(opt_type)) {
-                        .signed => try std.fmt.parseInt(real_type, raw_value, 0),
-                        .unsigned => try std.fmt.parseUnsigned(real_type, raw_value, 0),
+        // return true when set successfully
+        fn setOptionValue(self: Self, opt: *T, long_name: []const u8, raw_value: []const u8) !bool {
+            inline for (std.meta.fields(T)) |field| {
+                if (std.mem.eql(u8, field.name, long_name)) {
+                    @field(opt, field.name) =
+                        switch (comptime OptionType.from_zig_type(field.field_type)) {
+                        .Int, .RequiredInt => blk: {
+                            const real_type = comptime Self.getRealType(field.field_type);
+                            break :blk switch (Self.getSignedness(field.field_type)) {
+                                .signed => try std.fmt.parseInt(real_type, raw_value, 0),
+                                .unsigned => try std.fmt.parseUnsigned(real_type, raw_value, 0),
+                            };
+                        },
+                        .Float, .RequiredFloat => try std.fmt.parseFloat(field.field_type, raw_value),
+                        .String, .RequiredString => try self.allocator.dupe(u8, raw_value),
+                        .Bool, .RequiredBool => std.mem.eql(u8, raw_value, "true") or std.mem.eql(u8, raw_value, "1"),
                     };
-                },
-                .Float, .RequiredFloat => try std.fmt.parseFloat(opt_type, raw_value),
-                .String, .RequiredString => raw_value,
-                // bool require no parameter
-                .Bool, .RequiredBool => unreachable,
-            };
+
+                    return true;
+                }
+            }
+
+            return false;
         }
     };
 }
