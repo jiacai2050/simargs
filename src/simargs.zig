@@ -3,7 +3,7 @@
 const std = @import("std");
 const testing = std.testing;
 
-const ParseError = error{ NoProgram, NoLongOption, NoShortOption, MissingRequiredOption, OptionValueNotSet };
+const ParseError = error{ NoProgram, NoOption, MissingRequiredOption, MissingOptionValue };
 
 const OptionError = ParseError || std.mem.Allocator.Error || std.fmt.ParseIntError || std.fmt.ParseFloatError;
 
@@ -14,9 +14,7 @@ pub fn parse(
     comptime T: type,
 ) OptionError!StructArguments(T) {
     const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
-
-    var parser = OptionParser(T).init(allocator, comptime parseOptionFields(T), args);
+    var parser = OptionParser(T).init(allocator, args);
     return parser.parse();
 }
 
@@ -35,7 +33,6 @@ fn parseOptionFields(comptime T: type) [std.meta.fields(T).len]OptionField {
         opt_fields[idx] = .{
             .long_name = long_name,
             .opt_type = opt_type,
-            .is_set = false,
         };
     }
 
@@ -121,54 +118,49 @@ test "parseOptionFields" {
 fn StructArguments(comptime T: type) type {
     return struct {
         program: []const u8,
+        // Parsed arguments
         args: T,
+        // Unparsed arguments
+        raw_args: [][:0]u8,
         positional_args: std.ArrayList([]const u8),
         allocator: std.mem.Allocator,
 
         pub fn deinit(self: @This()) void {
-            self.allocator.free(self.program);
-
-            for (self.positional_args.items) |arg| {
-                self.allocator.free(arg);
-            }
             self.positional_args.deinit();
-
-            inline for (std.meta.fields(T)) |field| {
-                const opt_type = comptime OptionType.from_zig_type(field.field_type);
-                if (.RequiredString == opt_type) {
-                    self.allocator.free(@field(self.args, field.name));
-                }
-                if (.String == opt_type) {
-                    if (@field(self.args, field.name)) |v| {
-                        self.allocator.free(v);
-                    }
-                }
+            if (!@import("builtin").is_test) {
+                std.process.argsFree(self.allocator, self.raw_args);
             }
         }
 
         pub fn print_help(
             self: @This(),
+            writer: anytype,
         ) !void {
-            const fields = comptime parseOptionFields(T);
-            var stdout = std.io.getStdOut();
-            var w = stdout.writer();
-            var buf = std.ArrayList([]const u8).init(self.allocator);
-            defer buf.deinit();
+            var w = std.io.bufferedWriter(writer);
+            defer w.flush() catch |e| {
+                std.log.err("flush to writer failed, err:{any}", .{e});
+            };
 
+            const fields = comptime parseOptionFields(T);
             const header_tmpl =
                 \\ USAGE:
                 \\     {s} [OPTIONS] ...
                 \\
                 \\ OPTIONS:
+                \\
             ;
             const header = try std.fmt.allocPrint(self.allocator, header_tmpl, .{
                 self.program,
             });
-            try buf.append(header);
+            defer self.allocator.free(header);
+
+            _ = try w.write(header);
             // TODO: Maybe be too small(or big)?
             const msg_offset = 25;
             inline for (fields) |fld| {
                 var line_buf = std.ArrayList([]const u8).init(self.allocator);
+                defer line_buf.deinit();
+
                 try line_buf.append("\t");
                 if (fld.short_name) |sn| {
                     try line_buf.append("-");
@@ -192,10 +184,11 @@ fn StructArguments(comptime T: type) type {
                 }
                 try line_buf.append(fld.opt_type.as_string());
                 const line = try std.mem.join(self.allocator, "", line_buf.items);
-                try buf.append(line);
-            }
+                defer self.allocator.free(line);
 
-            try w.writeAll(try std.mem.join(self.allocator, "\n", buf.items));
+                _ = try w.write(line);
+                _ = try w.write("\n");
+            }
         }
     };
 }
@@ -267,9 +260,9 @@ test "OptionTypeParsing" {
 
 const OptionField = struct {
     long_name: []const u8,
+    opt_type: OptionType,
     short_name: ?u8 = null,
     message: ?[]const u8 = null,
-    opt_type: OptionType,
     is_set: bool = false,
 };
 
@@ -277,18 +270,18 @@ fn OptionParser(
     comptime T: type,
 ) type {
     return struct {
-        opt_fields: [std.meta.fields(T).len]OptionField,
         allocator: std.mem.Allocator,
-        args: [][]const u8,
+        args: [][:0]u8,
+        opt_fields: [std.meta.fields(T).len]OptionField,
 
         const Self = @This();
 
         // `T` is a struct, which define options
-        fn init(allocator: std.mem.Allocator, opt_fields: [std.meta.fields(T).len]OptionField, args: [][]const u8) Self {
+        fn init(allocator: std.mem.Allocator, args: [][:0]u8) Self {
             return .{
                 .allocator = allocator,
-                .opt_fields = opt_fields,
                 .args = args,
+                .opt_fields = comptime parseOptionFields(T),
             };
         }
 
@@ -310,12 +303,13 @@ fn OptionParser(
             }
 
             var result = StructArguments(T){
-                .program = try self.allocator.dupe(u8, self.args[0]),
+                .program = self.args[0],
                 .allocator = self.allocator,
                 .args = undefined,
                 .positional_args = std.ArrayList([]const u8).init(self.allocator),
+                .raw_args = self.args,
             };
-            errdefer self.allocator.free(result.program);
+            errdefer result.deinit();
 
             comptime inline for (std.meta.fields(T)) |fld| {
                 if (!OptionType.from_zig_type(fld.field_type).is_required()) {
@@ -336,7 +330,9 @@ fn OptionParser(
             while (arg_idx < self.args.len) {
                 const arg = self.args[arg_idx];
                 arg_idx += 1;
-                std.log.debug("current state is: {s}", .{@tagName(state)});
+                std.log.debug("state:{s}, arg:{s}", .{ @tagName(
+                    state,
+                ), arg });
 
                 switch (state) {
                     .start => {
@@ -360,8 +356,8 @@ fn OptionParser(
                             // short option
                             const short_name = arg[1..];
                             if (short_name.len != 1) {
-                                std.log.err("No such short option, name:{s}", .{arg});
-                                return error.NoShortOption;
+                                std.log.warn("No such short option, name:{s}", .{arg});
+                                return error.NoOption;
                             }
                             for (self.opt_fields) |*opt| {
                                 if (opt.short_name) |name| {
@@ -374,8 +370,8 @@ fn OptionParser(
                         }
 
                         var opt = current_opt orelse {
-                            std.log.err("Current option is null, option_name:{s}", .{arg});
-                            return error.NoLongOption;
+                            std.log.warn("Current option is null, option_name:{s}", .{arg});
+                            return error.NoOption;
                         };
 
                         if (opt.opt_type == .Bool or opt.opt_type == .RequiredBool) {
@@ -385,27 +381,28 @@ fn OptionParser(
                         }
                     },
                     .args => {
-                        const v = try self.allocator.dupe(u8, arg);
-                        errdefer self.allocator.free(v);
-
-                        try result.positional_args.append(v);
+                        try result.positional_args.append(arg);
                     },
                     .waitBoolValue => {
                         var opt = current_opt.?;
-                        var raw_value = arg;
                         // meet next option name, set current option value to true directly
                         if (std.mem.startsWith(u8, arg, "-")) {
                             // push back current arg
                             arg_idx -= 1;
-                            raw_value = "true";
+                            opt.is_set = try Self.setOptionValue(&result.args, opt.long_name, "true");
+                        } else {
+                            opt.is_set = try Self.setOptionValue(&result.args, opt.long_name, arg);
                         }
-                        opt.is_set = try self.setOptionValue(&result.args, opt.long_name, raw_value);
+                        // reset to initial status
                         state = .start;
+                        current_opt = null;
                     },
                     .waitValue => {
                         var opt = current_opt.?;
-                        opt.is_set = try self.setOptionValue(&result.args, opt.long_name, arg);
+                        opt.is_set = try Self.setOptionValue(&result.args, opt.long_name, arg);
+                        // reset to initial status
                         state = .start;
+                        current_opt = null;
                     },
                 }
             }
@@ -415,15 +412,15 @@ fn OptionParser(
                 .start, .args => {},
                 .waitBoolValue => {
                     var opt = current_opt.?;
-                    opt.is_set = try self.setOptionValue(&result.args, opt.long_name, "true");
+                    opt.is_set = try Self.setOptionValue(&result.args, opt.long_name, "true");
                 },
-                .waitValue => return error.OptionValueNotSet,
+                .waitValue => return error.MissingOptionValue,
             }
 
             inline for (self.opt_fields) |opt| {
                 if (opt.opt_type.is_required()) {
                     if (!opt.is_set) {
-                        std.log.err("Missing required option, name:{s}", .{opt.long_name});
+                        std.log.warn("Missing required option, name:{s}", .{opt.long_name});
                         return error.MissingRequiredOption;
                     }
                 }
@@ -447,7 +444,7 @@ fn OptionParser(
         }
 
         // return true when set successfully
-        fn setOptionValue(self: Self, opt: *T, long_name: []const u8, raw_value: []const u8) !bool {
+        fn setOptionValue(opt: *T, long_name: []const u8, raw_value: []const u8) !bool {
             inline for (std.meta.fields(T)) |field| {
                 if (std.mem.eql(u8, field.name, long_name)) {
                     @field(opt, field.name) =
@@ -459,8 +456,8 @@ fn OptionParser(
                                 .unsigned => try std.fmt.parseUnsigned(real_type, raw_value, 0),
                             };
                         },
-                        .Float, .RequiredFloat => try std.fmt.parseFloat(field.field_type, raw_value),
-                        .String, .RequiredString => try self.allocator.dupe(u8, raw_value),
+                        .Float, .RequiredFloat => try std.fmt.parseFloat(comptime Self.getRealType(field.field_type), raw_value),
+                        .String, .RequiredString => raw_value,
                         .Bool, .RequiredBool => std.mem.eql(u8, raw_value, "true") or std.mem.eql(u8, raw_value, "1"),
                     };
 
@@ -473,19 +470,141 @@ fn OptionParser(
     };
 }
 
-test "OptionParserNormalCase" {
-    const T = struct {
-        verbose: bool,
-        help: ?bool,
-        timeout: u16,
-        @"user-agent": ?[]const u8,
+const TestArguments = struct {
+    help: bool,
+    rate: ?f32,
+    timeout: u16,
+    @"user-agent": ?[]const u8,
 
-        pub const __shorts__ = .{
-            .verbose = .v,
-        };
+    pub const __shorts__ = .{
+        .help = .h,
+        .rate = .r,
     };
-    var args = [_][]const u8{ "abc", "dddd" };
-    var parser = OptionParser(T).init(std.testing.allocator, comptime parseOptionFields(T), args[0..]);
+
+    pub const __messages__ = .{ .help = "print this help message" };
+};
+
+test "parse/valid option values" {
+    const allocator = std.testing.allocator;
+    var args = [_][:0]u8{
+        try allocator.dupeZ(u8, "awesome-cli"),
+        try allocator.dupeZ(u8, "--help"),
+        try allocator.dupeZ(u8, "--rate"),
+        try allocator.dupeZ(u8, "1.2"),
+        try allocator.dupeZ(u8, "--timeout"),
+        try allocator.dupeZ(u8, "30"),
+        try allocator.dupeZ(u8, "--user-agent"),
+        try allocator.dupeZ(u8, "firefox"),
+        // positional args
+        try allocator.dupeZ(u8, "hello"),
+        try allocator.dupeZ(u8, "world"),
+    };
+    defer for (args) |arg| {
+        allocator.free(arg);
+    };
+
+    var parser = OptionParser(TestArguments).init(allocator, &args);
+    const opt = try parser.parse();
+    defer opt.deinit();
+
+    try std.testing.expectEqual(true, opt.args.help);
+    try std.testing.expectEqual(@as(f32, 1.2), opt.args.rate.?);
+    try std.testing.expectEqual(@as(u16, 30), opt.args.timeout);
+    try std.testing.expectEqualStrings("firefox", opt.args.@"user-agent".?);
+    try std.testing.expectEqualStrings("hello", opt.positional_args.items[0]);
+    try std.testing.expectEqualStrings("world", opt.positional_args.items[1]);
+
+    var help_msg = std.ArrayList(u8).init(allocator);
+    defer help_msg.deinit();
+
+    try opt.print_help(help_msg.writer());
+    try std.testing.expectEqualStrings(
+        \\ USAGE:
+        \\     awesome-cli [OPTIONS] ...
+        \\
+        \\ OPTIONS:
+        \\	-h, --help               print this help message [type: bool][REQUIRED]
+        \\	-r, --rate               [type: float]
+        \\	    --timeout            [type: integer][REQUIRED]
+        \\	    --user-agent         [type: string]
+        \\
+    , help_msg.items);
+}
+
+test "parse/missing required arguments" {
+    const allocator = std.testing.allocator;
+    var args = [_][:0]u8{
+        try allocator.dupeZ(u8, "abc"),
+        try allocator.dupeZ(u8, "def"),
+    };
+    defer for (args) |arg| {
+        allocator.free(arg);
+    };
+    var parser = OptionParser(TestArguments).init(allocator, &args);
 
     try std.testing.expectError(error.MissingRequiredOption, parser.parse());
+}
+
+test "parse/invalid u16 values" {
+    const allocator = std.testing.allocator;
+    var args = [_][:0]u8{
+        try allocator.dupeZ(u8, "awesome-cli"),
+        try allocator.dupeZ(u8, "--timeout"),
+        try allocator.dupeZ(u8, "not-a-number"),
+        try allocator.dupeZ(u8, "--help"),
+    };
+    defer for (args) |arg| {
+        allocator.free(arg);
+    };
+    var parser = OptionParser(TestArguments).init(allocator, &args);
+
+    try std.testing.expectError(error.InvalidCharacter, parser.parse());
+}
+
+test "parse/invalid f32 values" {
+    const allocator = std.testing.allocator;
+    var args = [_][:0]u8{
+        try allocator.dupeZ(u8, "awesome-cli"),
+        try allocator.dupeZ(u8, "--rate"),
+        try allocator.dupeZ(u8, "not-a-number"),
+        try allocator.dupeZ(u8, "--help"),
+    };
+    defer for (args) |arg| {
+        allocator.free(arg);
+    };
+    var parser = OptionParser(TestArguments).init(allocator, &args);
+
+    try std.testing.expectError(error.InvalidCharacter, parser.parse());
+}
+
+test "parse/unknown option" {
+    const allocator = std.testing.allocator;
+    var args = [_][:0]u8{
+        try allocator.dupeZ(u8, "awesome-cli"),
+        try allocator.dupeZ(u8, "-h"),
+        try allocator.dupeZ(u8, "--timeout"),
+        try allocator.dupeZ(u8, "1"),
+        try allocator.dupeZ(u8, "--notexists"),
+    };
+    defer for (args) |arg| {
+        allocator.free(arg);
+    };
+    var parser = OptionParser(TestArguments).init(allocator, &args);
+
+    try std.testing.expectError(error.NoOption, parser.parse());
+}
+
+test "parse/missing option value" {
+    const allocator = std.testing.allocator;
+    var args = [_][:0]u8{
+        try allocator.dupeZ(u8, "awesome-cli"),
+        try allocator.dupeZ(u8, "-h"),
+        try allocator.dupeZ(u8, "--timeout"),
+    };
+    defer for (args) |arg| {
+        allocator.free(arg);
+    };
+    var parser = OptionParser(TestArguments).init(allocator, &args);
+
+    try std.testing.expectError(error.MissingOptionValue, parser.parse());
 }
