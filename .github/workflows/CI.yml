@@ -5,11 +5,13 @@ on:
   pull_request:
     paths:
       - '**.zig'
+      - '**.yml'
   push:
     branches:
       - main
     paths:
       - '**.zig'
+      - '**.yml'
 
 jobs:
   test:
@@ -24,6 +26,8 @@ jobs:
       - uses: goto-bus-stop/setup-zig@v1
         with:
           version: master
+      - name: Run Test
+        run: zig build test
       - name: Run demo
         run: zig build run-demo -- -o /tmp/simargs.txt hello world
       - name: Memory leak detect

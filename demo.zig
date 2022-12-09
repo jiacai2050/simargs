@@ -44,5 +44,6 @@ pub fn main() !void {
 
     // Provide a print_help util method
     std.log.info("A print_help() method is provided-----------------", .{});
-    try opt.print_help();
+    const stdout = std.io.getStdOut();
+    try opt.print_help(stdout.writer());
 }
