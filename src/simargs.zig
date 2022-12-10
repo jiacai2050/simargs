@@ -265,10 +265,18 @@ const OptionType = enum(u32) {
 };
 
 test "parse OptionType" {
-    try std.testing.expectEqual(OptionType.RequiredInt, comptime OptionType.from_zig_type(i32));
-    try std.testing.expectEqual(OptionType.Int, comptime OptionType.from_zig_type(?i32));
-    try std.testing.expectEqual(OptionType.RequiredString, comptime OptionType.from_zig_type([]const u8));
-    try std.testing.expectEqual(OptionType.String, comptime OptionType.from_zig_type(?[]const u8));
+    const testcases = [_]std.meta.Tuple(&.{ type, OptionType }){
+        .{ i32, OptionType.RequiredInt },
+        .{ ?u8, OptionType.Int },
+        .{ f32, OptionType.RequiredFloat },
+        .{ ?f64, OptionType.Float },
+        .{ []const u8, OptionType.RequiredString },
+        .{ ?[]const u8, OptionType.String },
+    };
+
+    inline for (testcases) |tc| {
+        try std.testing.expectEqual(tc.@"1", comptime OptionType.from_zig_type(tc.@"0"));
+    }
 }
 
 fn OptionParser(
@@ -293,8 +301,8 @@ fn OptionParser(
         // State machine used to parse arguments. Available state transitions:
         // 1. start -> args
         // 2. start -> waitValue -> .. -> waitValue --> args -> ... -> args
-        // 3. start
-
+        // 3. start -> waitBoolValue
+        // 4. start
         const ParseState = enum {
             start,
             waitValue,
@@ -534,6 +542,39 @@ test "parse/valid option values" {
         \\	    --user-agent         [type: string]
         \\
     , help_msg.items);
+}
+
+test "parse/bool value" {
+    const allocator = std.testing.allocator;
+    {
+        var args = [_][:0]u8{
+            try allocator.dupeZ(u8, "awesome-cli"),
+            try allocator.dupeZ(u8, "--help"),
+        };
+        defer for (args) |arg| {
+            allocator.free(arg);
+        };
+        var parser = OptionParser(struct { help: bool }).init(allocator, &args);
+        const opt = try parser.parse();
+        defer opt.deinit();
+
+        try std.testing.expectEqual(true, opt.args.help);
+    }
+    {
+        var args = [_][:0]u8{
+            try allocator.dupeZ(u8, "awesome-cli"),
+            try allocator.dupeZ(u8, "--help"),
+            try allocator.dupeZ(u8, "true"),
+        };
+        defer for (args) |arg| {
+            allocator.free(arg);
+        };
+        var parser = OptionParser(struct { help: bool }).init(allocator, &args);
+        const opt = try parser.parse();
+        defer opt.deinit();
+
+        try std.testing.expectEqual(true, opt.args.help);
+    }
 }
 
 test "parse/missing required arguments" {
