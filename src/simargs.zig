@@ -520,6 +520,14 @@ test "parse/valid option values" {
     const opt = try parser.parse();
     defer opt.deinit();
 
+    // Can't compare struct directly, See following issue
+    // https://github.com/ziglang/zig/issues/12451
+    // try std.testing.expectEqual(opt.args, TestArguments{
+    //     .help = true,
+    //     .rate = 1.2,
+    //     .timeout = 30,
+    //     .@"user-agent" = "firefox",
+    // });
     try std.testing.expectEqual(true, opt.args.help);
     try std.testing.expectEqual(opt.args.rate.?, 1.2);
     try std.testing.expectEqual(opt.args.timeout, 30);
