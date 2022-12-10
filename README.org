@@ -46,10 +46,10 @@ user-agent: firefox
      ./zig-out/bin/demo [OPTIONS] ...
 
  OPTIONS:
-	-v, --verbose            Make the operation more talkative [type: bool]
-	-A, --user-agent         [type: string]
-	    --timeout            Max time this request can cost [default:30][type: integer]
-	-o, --output             Write to file instead of stdout [type: string][REQUIRED]
+	-v, --verbose                     Make the operation more talkative
+	-A, --user-agent=STRING
+	    --timeout=INTEGER             Max time this request can cost (default: 30)
+	-o, --output=STRING               Write to file instead of stdout (required)
 #+end_example
 * Install
 Add =simargs= to your projects via submodule, and in =build.zig= add

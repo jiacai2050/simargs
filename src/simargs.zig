@@ -162,44 +162,59 @@ fn StructArguments(comptime T: type) type {
 
             try writer.writeAll(header);
             // TODO: Maybe be too small(or big)?
-            const msg_offset = 25;
+            const msg_offset = 35;
             inline for (fields) |opt_fld| {
-                try writer.writeAll("\t");
-                if (opt_fld.short_name) |sn| {
-                    try writer.writeAll("-");
-                    try writer.writeAll(&[_]u8{sn});
-                    try writer.writeAll(", ");
-                } else {
-                    try writer.writeAll("    ");
-                }
-                try writer.writeAll("--");
-                try writer.writeAll(opt_fld.long_name);
+                var curr_opt = std.ArrayList([]const u8).init(self.allocator);
+                defer curr_opt.deinit();
 
-                var blanks = msg_offset - (4 + 2 + opt_fld.long_name.len);
+                try curr_opt.append("\t");
+                if (opt_fld.short_name) |sn| {
+                    try curr_opt.append("-");
+                    try curr_opt.append(&[_]u8{sn});
+                    try curr_opt.append(", ");
+                } else {
+                    try curr_opt.append("    ");
+                }
+                try curr_opt.append("--");
+                try curr_opt.append(opt_fld.long_name);
+                try curr_opt.append(opt_fld.opt_type.as_string());
+
+                var blanks: usize = msg_offset;
+                for (curr_opt.items) |v| {
+                    blanks -= v.len;
+                }
                 while (blanks > 0) {
-                    try writer.writeAll(" ");
+                    try curr_opt.append(" ");
                     blanks -= 1;
                 }
 
                 if (opt_fld.message) |msg| {
-                    try writer.writeAll(msg);
-                    try writer.writeAll(" ");
+                    try curr_opt.append(msg);
+                    try curr_opt.append(" ");
                 }
+                const first_part = try std.mem.join(self.allocator, "", curr_opt.items);
+                defer self.allocator.free(first_part);
+                try writer.writeAll(first_part);
+
                 inline for (std.meta.fields(T)) |f| {
                     if (std.mem.eql(u8, f.name, opt_fld.long_name)) {
                         if (f.default_value) |v| {
                             const default = @ptrCast(*align(1) const f.field_type, v).*;
-                            const format = switch (@TypeOf(default)) {
-                                []const u8 => "[default:{s}]",
-                                ?[]const u8 => "[default:{?s}]",
-                                else => "[default:{any}]",
-                            };
+                            const format = "(default: " ++ switch (@TypeOf(default)) {
+                                []const u8 => "{s}",
+                                ?[]const u8 => "{?s}",
+                                else => "{any}",
+                            } ++ ")";
 
                             try std.fmt.format(writer, format, .{default});
+                        } else {
+                            if (opt_fld.opt_type.is_required()) {
+                                try writer.writeAll("(required)");
+                            }
                         }
                     }
                 }
-                try writer.writeAll(opt_fld.opt_type.as_string());
+
                 try writer.writeAll("\n");
             }
         }
@@ -252,14 +267,10 @@ const OptionType = enum(u32) {
 
     fn as_string(self: Self) []const u8 {
         return switch (self) {
-            .Int => "[type: integer]",
-            .RequiredInt => "[type: integer][REQUIRED]",
-            .Bool => "[type: bool]",
-            .RequiredBool => "[type: bool][REQUIRED]",
-            .Float => "[type: float]",
-            .RequiredFloat => "[type: float][REQUIRED]",
-            .String => "[type: string]",
-            .RequiredString => "[type: string][REQUIRED]",
+            .Int, .RequiredInt => "=INTEGER",
+            .Bool, .RequiredBool => "",
+            .Float, .RequiredFloat => "=FLOAT",
+            .String, .RequiredString => "=STRING",
         };
     }
 };
@@ -485,9 +496,9 @@ fn OptionParser(
 
 const TestArguments = struct {
     help: bool,
-    rate: ?f32,
+    rate: ?f32 = 2,
     timeout: u16,
-    @"user-agent": ?[]const u8,
+    @"user-agent": ?[]const u8 = "Brave",
 
     pub const __shorts__ = .{
         .help = .h,
@@ -544,10 +555,10 @@ test "parse/valid option values" {
         \\     awesome-cli [OPTIONS] ...
         \\
         \\ OPTIONS:
-        \\	-h, --help               print this help message [type: bool][REQUIRED]
-        \\	-r, --rate               [type: float]
-        \\	    --timeout            [type: integer][REQUIRED]
-        \\	    --user-agent         [type: string]
+        \\	-h, --help                        print this help message (required)
+        \\	-r, --rate=FLOAT                  (default: 2.0e+00)
+        \\	    --timeout=INTEGER             (required)
+        \\	    --user-agent=STRING           (default: Brave)
         \\
     , help_msg.items);
 }
@@ -692,14 +703,14 @@ test "parse/default value" {
         \\     awesome-cli [OPTIONS] ...
         \\
         \\ OPTIONS:
-        \\	    --a1                 [default:A1][type: string][REQUIRED]
-        \\	    --a2                 [default:A2][type: string]
-        \\	    --b1                 [default:1][type: integer][REQUIRED]
-        \\	    --b2                 [default:11][type: integer]
-        \\	    --c1                 [default:1.5e+00][type: float][REQUIRED]
-        \\	    --c2                 [default:2.5e+00][type: float]
-        \\	    --d1                 [default:true][type: bool][REQUIRED]
-        \\	    --d2                 [default:false][type: bool]
+        \\	    --a1=STRING                   (default: A1)
+        \\	    --a2=STRING                   (default: A2)
+        \\	    --b1=INTEGER                  (default: 1)
+        \\	    --b2=INTEGER                  (default: 11)
+        \\	    --c1=FLOAT                    (default: 1.5e+00)
+        \\	    --c2=FLOAT                    (default: 2.5e+00)
+        \\	    --d1                          (default: true)
+        \\	    --d2                          (default: false)
         \\
     , help_msg.items);
 }
