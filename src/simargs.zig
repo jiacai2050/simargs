@@ -18,6 +18,15 @@ pub fn parse(
     return parser.parse();
 }
 
+const OptionField = struct {
+    long_name: []const u8,
+    opt_type: OptionType,
+    short_name: ?u8 = null,
+    message: ?[]const u8 = null,
+    // whether this option is set
+    is_set: bool = false,
+};
+
 fn parseOptionFields(comptime T: type) [std.meta.fields(T).len]OptionField {
     const option_type_info = @typeInfo(T);
     if (option_type_info != .Struct) {
@@ -33,6 +42,8 @@ fn parseOptionFields(comptime T: type) [std.meta.fields(T).len]OptionField {
         opt_fields[idx] = .{
             .long_name = long_name,
             .opt_type = opt_type,
+            // option with default value is set automatically
+            .is_set = !(fld.default_value == null),
         };
     }
 
@@ -84,7 +95,7 @@ fn parseOptionFields(comptime T: type) [std.meta.fields(T).len]OptionField {
     return opt_fields;
 }
 
-test "parseOptionFields" {
+test "parse option fields" {
     const fields = comptime parseOptionFields(struct {
         verbose: bool,
         help: ?bool,
@@ -136,11 +147,6 @@ fn StructArguments(comptime T: type) type {
             self: @This(),
             writer: anytype,
         ) !void {
-            var w = std.io.bufferedWriter(writer);
-            defer w.flush() catch |e| {
-                std.log.err("flush to writer failed, err:{any}", .{e});
-            };
-
             const fields = comptime parseOptionFields(T);
             const header_tmpl =
                 \\ USAGE:
@@ -154,40 +160,45 @@ fn StructArguments(comptime T: type) type {
             });
             defer self.allocator.free(header);
 
-            _ = try w.write(header);
+            try writer.writeAll(header);
             // TODO: Maybe be too small(or big)?
             const msg_offset = 25;
-            inline for (fields) |fld| {
-                var line_buf = std.ArrayList([]const u8).init(self.allocator);
-                defer line_buf.deinit();
-
-                try line_buf.append("\t");
-                if (fld.short_name) |sn| {
-                    try line_buf.append("-");
-                    try line_buf.append(&[_]u8{sn});
-                    try line_buf.append(", ");
+            inline for (fields) |opt_fld| {
+                try writer.writeAll("\t");
+                if (opt_fld.short_name) |sn| {
+                    try writer.writeAll("-");
+                    try writer.writeAll(&[_]u8{sn});
+                    try writer.writeAll(", ");
                 } else {
-                    try line_buf.append("    ");
+                    try writer.writeAll("    ");
                 }
-                try line_buf.append("--");
-                try line_buf.append(fld.long_name);
+                try writer.writeAll("--");
+                try writer.writeAll(opt_fld.long_name);
 
-                var blanks = msg_offset - (4 + 2 + fld.long_name.len);
+                var blanks = msg_offset - (4 + 2 + opt_fld.long_name.len);
                 while (blanks > 0) {
-                    try line_buf.append(" ");
+                    try writer.writeAll(" ");
                     blanks -= 1;
                 }
 
-                if (fld.message) |msg| {
-                    try line_buf.append(msg);
-                    try line_buf.append(" ");
+                if (opt_fld.message) |msg| {
+                    try writer.writeAll(msg);
+                    try writer.writeAll(" ");
                 }
-                try line_buf.append(fld.opt_type.as_string());
-                const line = try std.mem.join(self.allocator, "", line_buf.items);
-                defer self.allocator.free(line);
-
-                _ = try w.write(line);
-                _ = try w.write("\n");
+                inline for (std.meta.fields(T)) |f| {
+                    if (std.mem.eql(u8, f.name, opt_fld.long_name)) {
+                        if (f.default_value) |v| {
+                            const default = @ptrCast(*align(1) const f.field_type, v).*;
+                            switch (@TypeOf(default)) {
+                                []const u8 => try std.fmt.format(writer, "[default:{s}]", .{default}),
+                                ?[]const u8 => try std.fmt.format(writer, "[default:{?s}]", .{default}),
+                                else => try std.fmt.format(writer, "[default:{any}]", .{default}),
+                            }
+                        }
+                    }
+                }
+                try writer.writeAll(opt_fld.opt_type.as_string());
+                try writer.writeAll("\n");
             }
         }
     };
@@ -251,20 +262,12 @@ const OptionType = enum(u32) {
     }
 };
 
-test "OptionTypeParsing" {
+test "parse OptionType" {
     try std.testing.expectEqual(OptionType.RequiredInt, comptime OptionType.from_zig_type(i32));
     try std.testing.expectEqual(OptionType.Int, comptime OptionType.from_zig_type(?i32));
     try std.testing.expectEqual(OptionType.RequiredString, comptime OptionType.from_zig_type([]const u8));
     try std.testing.expectEqual(OptionType.String, comptime OptionType.from_zig_type(?[]const u8));
 }
-
-const OptionField = struct {
-    long_name: []const u8,
-    opt_type: OptionType,
-    short_name: ?u8 = null,
-    message: ?[]const u8 = null,
-    is_set: bool = false,
-};
 
 fn OptionParser(
     comptime T: type,
@@ -312,12 +315,12 @@ fn OptionParser(
             errdefer result.deinit();
 
             comptime inline for (std.meta.fields(T)) |fld| {
-                if (!OptionType.from_zig_type(fld.field_type).is_required()) {
-                    if (fld.default_value) |v| {
-                        // https://github.com/ziglang/zig/blob/d69e97ae1677ca487833caf6937fa428563ed0ae/lib/std/json.zig#L1590
-                        // why align(1) is used here?
-                        @field(result.args, fld.name) = @ptrCast(*align(1) const fld.field_type, v).*;
-                    } else {
+                if (fld.default_value) |v| {
+                    // https://github.com/ziglang/zig/blob/d69e97ae1677ca487833caf6937fa428563ed0ae/lib/std/json.zig#L1590
+                    // why align(1) is used here?
+                    @field(result.args, fld.name) = @ptrCast(*align(1) const fld.field_type, v).*;
+                } else {
+                    if (!OptionType.from_zig_type(fld.field_type).is_required()) {
                         @field(result.args, fld.name) = null;
                     }
                 }
@@ -508,8 +511,8 @@ test "parse/valid option values" {
     defer opt.deinit();
 
     try std.testing.expectEqual(true, opt.args.help);
-    try std.testing.expectEqual(@as(f32, 1.2), opt.args.rate.?);
-    try std.testing.expectEqual(@as(u16, 30), opt.args.timeout);
+    try std.testing.expectEqual(opt.args.rate.?, 1.2);
+    try std.testing.expectEqual(opt.args.timeout, 30);
     try std.testing.expectEqualStrings("firefox", opt.args.@"user-agent".?);
     try std.testing.expectEqualStrings("hello", opt.positional_args.items[0]);
     try std.testing.expectEqualStrings("world", opt.positional_args.items[1]);
@@ -607,4 +610,45 @@ test "parse/missing option value" {
     var parser = OptionParser(TestArguments).init(allocator, &args);
 
     try std.testing.expectError(error.MissingOptionValue, parser.parse());
+}
+
+test "parse/default value" {
+    const allocator = std.testing.allocator;
+    var args = [_][:0]u8{
+        try allocator.dupeZ(u8, "awesome-cli"),
+    };
+    defer for (args) |arg| {
+        allocator.free(arg);
+    };
+    var parser = OptionParser(struct {
+        a1: []const u8 = "A1",
+        a2: ?[]const u8 = "A2",
+        b1: u8 = 1,
+        b2: ?u8 = 11,
+        c1: f16 = 1.5,
+        c2: ?f16 = 2.5,
+        d1: bool = true,
+        d2: ?bool = false,
+    }).init(allocator, &args);
+    const opt = try parser.parse();
+    try std.testing.expectEqualStrings("A1", opt.args.a1);
+    try std.testing.expectEqual(opt.positional_args.items.len, 0);
+    var help_msg = std.ArrayList(u8).init(allocator);
+    defer help_msg.deinit();
+    try opt.print_help(help_msg.writer());
+    try std.testing.expectEqualStrings(
+        \\ USAGE:
+        \\     awesome-cli [OPTIONS] ...
+        \\
+        \\ OPTIONS:
+        \\	    --a1                 [default:A1][type: string][REQUIRED]
+        \\	    --a2                 [default:A2][type: string]
+        \\	    --b1                 [default:1][type: integer][REQUIRED]
+        \\	    --b2                 [default:11][type: integer]
+        \\	    --c1                 [default:1.5e+00][type: float][REQUIRED]
+        \\	    --c2                 [default:2.5e+00][type: float]
+        \\	    --d1                 [default:true][type: bool][REQUIRED]
+        \\	    --d2                 [default:false][type: bool]
+        \\
+    , help_msg.items);
 }
