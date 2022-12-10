@@ -32,24 +32,33 @@ pub fn main() !void {
     });
     defer opt.deinit();
 
-    std.debug.print("----Program-------\n{s}\n", .{opt.program});
-    std.debug.print("----Arguments-----\n", .{});
+    const sep_len = 30;
+    std.debug.print("{s}Program{s}\n{s}\n\n", .{ "-" ** sep_len, "-" ** sep_len, opt.program });
+    std.debug.print("{s}Arguments{s}\n", .{
+        "-" ** sep_len,
+        "-" ** sep_len,
+    });
     inline for (std.meta.fields(@TypeOf(opt.args))) |fld| {
-        const format = switch (fld.field_type) {
-            []const u8 => "name:{s}, value:{s}\n",
-            ?[]const u8 => "name:{s}, value:{?s}\n",
-            else => "name:{s}, value:{any}\n",
-        };
+        const format = "{s:>10}: " ++ switch (fld.field_type) {
+            []const u8 => "{s}",
+            ?[]const u8 => "{?s}",
+            else => "{any}",
+        } ++ "\n";
         std.debug.print(format, .{ fld.name, @field(opt.args, fld.name) });
     }
-
-    std.debug.print("----Positionals---\n", .{});
+    std.debug.print("\n{s}Positionals{s}\n", .{
+        "-" ** sep_len,
+        "-" ** sep_len,
+    });
     for (opt.positional_args.items) |arg, idx| {
-        std.debug.print("{d}-{s}\n", .{ idx + 1, arg });
+        std.debug.print("{d}: {s}\n", .{ idx + 1, arg });
     }
 
     // Provide a print_help util method
-    std.debug.print("----print_help()--\n", .{});
+    std.debug.print("\n{s}print_help{s}\n", .{
+        "-" ** sep_len,
+        "-" ** sep_len,
+    });
     const stdout = std.io.getStdOut();
     try opt.print_help(stdout.writer());
 }

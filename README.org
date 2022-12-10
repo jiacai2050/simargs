@@ -17,7 +17,7 @@ A simple, opinionated, struct-based argument parser in Zig, taking full advantag
   - For bool option, =-h=, =-h 1= and =-h true= all mean =true=
 - Optional fields and fields with default value mean they are optional arguments
 - Use =comptime= as possible as I can
-- Provide =print_help()= out of the box
+- Provide =print_help(writer)= out of the box
 * Usage
 See [[file:demo.zig]]
 
@@ -28,17 +28,20 @@ zig build && ./zig-out/bin/demo -o /tmp/a.out --user-agent firefox hello world 2
 
 #+RESULTS:
 #+begin_example
-----Program-------
+------------------------------Program------------------------------
 ./zig-out/bin/demo
-----Arguments-----
-name:verbose, value:null
-name:user-agent, value:firefox
-name:timeout, value:30
-name:output, value:/tmp/a.out
-----Positionals---
-1-hello
-2-world
-----print_help()--
+
+------------------------------Arguments------------------------------
+   verbose: null
+user-agent: firefox
+   timeout: 30
+    output: /tmp/a.out
+
+------------------------------Positionals------------------------------
+1: hello
+2: world
+
+------------------------------print_help------------------------------
  USAGE:
      ./zig-out/bin/demo [OPTIONS] ...
 
