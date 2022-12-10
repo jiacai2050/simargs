@@ -12,7 +12,7 @@ pub fn main() !void {
         // Those fields declare arguments options
         // only `output` is required, others are all optional
         verbose: ?bool,
-        @"user-agent": ?[]const u8,
+        @"user-agent": ?enum { Chrome, Firefox, Safari },
         timeout: ?u16 = 30, // default value
         output: []const u8,
 

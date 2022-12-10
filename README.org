@@ -14,7 +14,8 @@ A simple, opinionated, struct-based argument parser in Zig, taking full advantag
 - Supported data type:
   - All [[https://ziglang.org/documentation/master/#Primitive-Types][primitive types]], such as =i8=, =f32=, =bool=
   - =[]const u8=
-  - For bool option, =-h=, =-h 1= and =-h true= all mean =true=
+  - =Enum=
+- For bool option, =-h=, =-h 1= and =-h true= all mean =true=
 - Optional fields and fields with default value mean they are optional arguments
 - Use =comptime= as possible as I can
 - Provide =print_help(writer)= out of the box
@@ -23,7 +24,7 @@ See [[file:demo.zig]]
 
 #+begin_src bash :results verbatim :exports both
 # Run demo
-zig build && ./zig-out/bin/demo -o /tmp/a.out --user-agent firefox hello world 2>&1
+zig build && ./zig-out/bin/demo -o /tmp/a.out --user-agent Firefox hello world 2>&1
 #+end_src
 
 #+RESULTS:
@@ -33,7 +34,7 @@ zig build && ./zig-out/bin/demo -o /tmp/a.out --user-agent firefox hello world 2
 
 ------------------------------Arguments------------------------------
    verbose: null
-user-agent: firefox
+user-agent: demo.main__struct_1542.main__struct_1542__enum_1629.Firefox
    timeout: 30
     output: /tmp/a.out
 
@@ -47,7 +48,7 @@ user-agent: firefox
 
  OPTIONS:
 	-v, --verbose                     Make the operation more talkative
-	-A, --user-agent=STRING
+	-A, --user-agent=STRING           (valid: Chrome/Firefox/Safari)
 	    --timeout=INTEGER             Max time this request can cost (default: 30)
 	-o, --output=STRING               Write to file instead of stdout (required)
 #+end_example

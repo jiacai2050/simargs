@@ -3,7 +3,7 @@
 const std = @import("std");
 const testing = std.testing;
 
-const ParseError = error{ NoProgram, NoOption, MissingRequiredOption, MissingOptionValue };
+const ParseError = error{ NoProgram, NoOption, MissingRequiredOption, MissingOptionValue, InvalidEnumValue };
 
 const OptionError = ParseError || std.mem.Allocator.Error || std.fmt.ParseIntError || std.fmt.ParseFloatError;
 
@@ -126,6 +126,13 @@ test "parse option fields" {
     try std.testing.expectEqual(last_opt.is_set, fields[3].is_set);
 }
 
+fn getRealType(comptime opt_type: type) type {
+    return switch (@typeInfo(opt_type)) {
+        .Optional => |o| getRealType(o.child),
+        else => opt_type,
+    };
+}
+
 fn StructArguments(comptime T: type) type {
     return struct {
         program: []const u8,
@@ -198,6 +205,14 @@ fn StructArguments(comptime T: type) type {
 
                 inline for (std.meta.fields(T)) |f| {
                     if (std.mem.eql(u8, f.name, opt_fld.long_name)) {
+                        const real_type = getRealType(f.field_type);
+                        if (@typeInfo(real_type) == .Enum) {
+                            const enum_opts = try std.mem.join(self.allocator, "/", std.meta.fieldNames(real_type));
+                            defer self.allocator.free(enum_opts);
+                            try writer.writeAll("(valid: ");
+                            try writer.writeAll(enum_opts);
+                            try writer.writeAll(")");
+                        }
                         if (f.default_value) |v| {
                             const default = @ptrCast(*align(1) const f.field_type, v).*;
                             const format = "(default: " ++ switch (@TypeOf(default)) {
@@ -229,11 +244,13 @@ const OptionType = enum(u32) {
     RequiredBool,
     RequiredFloat,
     RequiredString,
+    RequiredEnum,
 
     Int = Self.REQUIRED_VERSION_SHIFT,
     Bool,
     Float,
     String,
+    Enum,
 
     fn from_zig_type(
         comptime T: type,
@@ -254,6 +271,7 @@ const OptionType = enum(u32) {
             else {
                 @compileError("not supported option type:" ++ @typeName(T));
             },
+            .Enum => .RequiredEnum,
             else => {
                 @compileError("not supported option type:" ++ @typeName(T));
             },
@@ -271,6 +289,7 @@ const OptionType = enum(u32) {
             .Bool, .RequiredBool => "",
             .Float, .RequiredFloat => "=FLOAT",
             .String, .RequiredString => "=STRING",
+            .Enum, .RequiredEnum => "=STRING",
         };
     }
 };
@@ -283,6 +302,8 @@ test "parse OptionType" {
         .{ ?f64, OptionType.Float },
         .{ []const u8, OptionType.RequiredString },
         .{ ?[]const u8, OptionType.String },
+        .{ enum {}, OptionType.RequiredEnum },
+        .{ ?enum {}, OptionType.Enum },
     };
 
     inline for (testcases) |tc| {
@@ -460,13 +481,6 @@ fn OptionParser(
             };
         }
 
-        fn getRealType(comptime opt_type: type) type {
-            return switch (@typeInfo(opt_type)) {
-                .Optional => |o| Self.getRealType(o.child),
-                else => opt_type,
-            };
-        }
-
         // return true when set successfully
         fn setOptionValue(opt: *T, long_name: []const u8, raw_value: []const u8) !bool {
             inline for (std.meta.fields(T)) |field| {
@@ -474,15 +488,22 @@ fn OptionParser(
                     @field(opt, field.name) =
                         switch (comptime OptionType.from_zig_type(field.field_type)) {
                         .Int, .RequiredInt => blk: {
-                            const real_type = comptime Self.getRealType(field.field_type);
+                            const real_type = comptime getRealType(field.field_type);
                             break :blk switch (Self.getSignedness(field.field_type)) {
                                 .signed => try std.fmt.parseInt(real_type, raw_value, 0),
                                 .unsigned => try std.fmt.parseUnsigned(real_type, raw_value, 0),
                             };
                         },
-                        .Float, .RequiredFloat => try std.fmt.parseFloat(comptime Self.getRealType(field.field_type), raw_value),
+                        .Float, .RequiredFloat => try std.fmt.parseFloat(comptime getRealType(field.field_type), raw_value),
                         .String, .RequiredString => raw_value,
                         .Bool, .RequiredBool => std.mem.eql(u8, raw_value, "true") or std.mem.eql(u8, raw_value, "1"),
+                        .Enum, .RequiredEnum => blk: {
+                            if (std.meta.stringToEnum(comptime getRealType(field.field_type), raw_value)) |v| {
+                                break :blk v;
+                            } else {
+                                return error.InvalidEnumValue;
+                            }
+                        },
                     };
 
                     return true;
@@ -711,6 +732,33 @@ test "parse/default value" {
         \\	    --c2=FLOAT                    (default: 2.5e+00)
         \\	    --d1                          (default: true)
         \\	    --d2                          (default: false)
+        \\
+    , help_msg.items);
+}
+
+test "parse/enum option" {
+    const allocator = std.testing.allocator;
+    var args = [_][:0]u8{
+        try allocator.dupeZ(u8, "awesome-cli"),
+        try allocator.dupeZ(u8, "--a1"),
+        try allocator.dupeZ(u8, "A"),
+    };
+    defer for (args) |arg| {
+        allocator.free(arg);
+    };
+    var parser = OptionParser(struct { a1: enum { A, B }, help: bool = false }).init(allocator, &args);
+    const opt = try parser.parse();
+    try std.testing.expectEqual(opt.args.a1, .A);
+    var help_msg = std.ArrayList(u8).init(allocator);
+    defer help_msg.deinit();
+    try opt.print_help(help_msg.writer());
+    try std.testing.expectEqualStrings(
+        \\ USAGE:
+        \\     awesome-cli [OPTIONS] ...
+        \\
+        \\ OPTIONS:
+        \\	    --a1=STRING                   (valid: A/B)(required)
+        \\	    --help                        (default: false)
         \\
     , help_msg.items);
 }
