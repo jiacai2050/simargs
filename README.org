@@ -8,14 +8,14 @@
 
 [[https://github.com/jiacai2050/simargs/actions/workflows/CI.yml][https://github.com/jiacai2050/simargs/actions/workflows/CI.yml/badge.svg]]
 
-A simple, opinionated, struct-based argument parser in Zig, taking full advantage of =comptime=.
+A simple, opinionated, struct-based argument parser in Zig, taking full advantage of [[https://kristoff.it/blog/what-is-zig-comptime/][comptime]].
 
 * Features
 - Supported data type:
   - All [[https://ziglang.org/documentation/master/#Primitive-Types][primitive types]], such as =i8=, =f32=, =bool=
   - =[]const u8=
-  - For bool option =h=, =-h=, =-h 1= and =-h true= all mean =true=
-- =Optionals= means this field is an optional argument
+  - For bool option, =-h=, =-h 1= and =-h true= all mean =true=
+- Optional fields and fields with default value mean they are optional arguments
 - Use =comptime= as possible as I can
 - Provide =print_help()= out of the box
 * Usage
@@ -23,28 +23,29 @@ See [[file:demo.zig]]
 
 #+begin_src bash :results verbatim :exports both
 # Run demo
-zig build && ./zig-out/bin/demo --output /tmp/a.out hello world 2>&1
+zig build && ./zig-out/bin/demo -o /tmp/a.out --user-agent firefox hello world 2>&1
 #+end_src
 
 #+RESULTS:
 #+begin_example
-info: Program: ./zig-out/bin/demo
-info: Arguments:-----------------
-info: option name:verbose, value:null
-info: option name:user-agent, value:null
-info: option name:timeout, value:30
-info: option name:output, value:{ 47, 116, 109, 112, 47, 97, 46, 111, 117, 116 }
-info: Positional arguments: -----------------
-info: hello
-info: world
-info: A print_help() method is provided-----------------
+----Program-------
+./zig-out/bin/demo
+----Arguments-----
+name:verbose, value:null
+name:user-agent, value:firefox
+name:timeout, value:30
+name:output, value:/tmp/a.out
+----Positionals---
+1-hello
+2-world
+----print_help()--
  USAGE:
      ./zig-out/bin/demo [OPTIONS] ...
 
  OPTIONS:
 	-v, --verbose            Make the operation more talkative [type: bool]
 	-A, --user-agent         [type: string]
-	    --timeout            Max time this request can cost [type: integer]
+	    --timeout            Max time this request can cost [default:30][type: integer]
 	-o, --output             Write to file instead of stdout [type: string][REQUIRED]
 #+end_example
 * Install

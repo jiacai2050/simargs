@@ -32,18 +32,24 @@ pub fn main() !void {
     });
     defer opt.deinit();
 
-    std.log.info("Program: {s}", .{opt.program});
-    std.log.info("Arguments:-----------------", .{});
+    std.debug.print("----Program-------\n{s}\n", .{opt.program});
+    std.debug.print("----Arguments-----\n", .{});
     inline for (std.meta.fields(@TypeOf(opt.args))) |fld| {
-        std.log.info("option name:{s}, value:{any}", .{ fld.name, @field(opt.args, fld.name) });
+        const format = switch (fld.field_type) {
+            []const u8 => "name:{s}, value:{s}\n",
+            ?[]const u8 => "name:{s}, value:{?s}\n",
+            else => "name:{s}, value:{any}\n",
+        };
+        std.debug.print(format, .{ fld.name, @field(opt.args, fld.name) });
     }
-    std.log.info("Positional arguments: -----------------", .{});
-    for (opt.positional_args.items) |arg| {
-        std.log.info("{s}", .{arg});
+
+    std.debug.print("----Positionals---\n", .{});
+    for (opt.positional_args.items) |arg, idx| {
+        std.debug.print("{d}-{s}\n", .{ idx + 1, arg });
     }
 
     // Provide a print_help util method
-    std.log.info("A print_help() method is provided-----------------", .{});
+    std.debug.print("----print_help()--\n", .{});
     const stdout = std.io.getStdOut();
     try opt.print_help(stdout.writer());
 }

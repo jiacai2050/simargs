@@ -189,11 +189,13 @@ fn StructArguments(comptime T: type) type {
                     if (std.mem.eql(u8, f.name, opt_fld.long_name)) {
                         if (f.default_value) |v| {
                             const default = @ptrCast(*align(1) const f.field_type, v).*;
-                            switch (@TypeOf(default)) {
-                                []const u8 => try std.fmt.format(writer, "[default:{s}]", .{default}),
-                                ?[]const u8 => try std.fmt.format(writer, "[default:{?s}]", .{default}),
-                                else => try std.fmt.format(writer, "[default:{any}]", .{default}),
-                            }
+                            const format = switch (@TypeOf(default)) {
+                                []const u8 => "[default:{s}]",
+                                ?[]const u8 => "[default:{?s}]",
+                                else => "[default:{any}]",
+                            };
+
+                            try std.fmt.format(writer, format, .{default});
                         }
                     }
                 }
