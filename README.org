@@ -48,7 +48,7 @@ user-agent: demo.main__struct_1542.main__struct_1542__enum_1629.Firefox
 
  OPTIONS:
 	-v, --verbose                     Make the operation more talkative
-	-A, --user-agent=STRING           (valid: Chrome/Firefox/Safari)
+	-A, --user-agent=STRING           (valid: Chrome|Firefox|Safari)(default: Firefox)
 	    --timeout=INTEGER             Max time this request can cost (default: 30)
 	-o, --output=STRING               Write to file instead of stdout (required)
 #+end_example

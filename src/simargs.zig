@@ -207,7 +207,7 @@ fn StructArguments(comptime T: type) type {
                     if (std.mem.eql(u8, f.name, opt_fld.long_name)) {
                         const real_type = getRealType(f.field_type);
                         if (@typeInfo(real_type) == .Enum) {
-                            const enum_opts = try std.mem.join(self.allocator, "/", std.meta.fieldNames(real_type));
+                            const enum_opts = try std.mem.join(self.allocator, "|", std.meta.fieldNames(real_type));
                             defer self.allocator.free(enum_opts);
                             try writer.writeAll("(valid: ");
                             try writer.writeAll(enum_opts);
@@ -215,13 +215,19 @@ fn StructArguments(comptime T: type) type {
                         }
                         if (f.default_value) |v| {
                             const default = @ptrCast(*align(1) const f.field_type, v).*;
-                            const format = "(default: " ++ switch (@TypeOf(default)) {
+                            const format = "(default: " ++ switch (f.field_type) {
                                 []const u8 => "{s}",
                                 ?[]const u8 => "{?s}",
-                                else => "{any}",
+                                else => if (@typeInfo(f.field_type) == .Enum)
+                                    "{s}"
+                                else
+                                    "{any}",
                             } ++ ")";
 
-                            try std.fmt.format(writer, format, .{default});
+                            try std.fmt.format(writer, format, .{if (@typeInfo(f.field_type) == .Enum)
+                                @tagName(default)
+                            else
+                                default});
                         } else {
                             if (opt_fld.opt_type.is_required()) {
                                 try writer.writeAll("(required)");
@@ -746,7 +752,7 @@ test "parse/enum option" {
     defer for (args) |arg| {
         allocator.free(arg);
     };
-    var parser = OptionParser(struct { a1: enum { A, B }, help: bool = false }).init(allocator, &args);
+    var parser = OptionParser(struct { a1: enum { A, B } = .A, help: bool = false }).init(allocator, &args);
     const opt = try parser.parse();
     try std.testing.expectEqual(opt.args.a1, .A);
     var help_msg = std.ArrayList(u8).init(allocator);
@@ -757,7 +763,7 @@ test "parse/enum option" {
         \\     awesome-cli [OPTIONS] ...
         \\
         \\ OPTIONS:
-        \\	    --a1=STRING                   (valid: A/B)(required)
+        \\	    --a1=STRING                   (valid: A|B)(default: A)
         \\	    --help                        (default: false)
         \\
     , help_msg.items);
