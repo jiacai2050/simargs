@@ -191,7 +191,7 @@ fn StructArguments(comptime T: type) type {
         pub fn print_help(
             self: Self,
             writer: anytype,
-            arg_prompt: ?[]const u8,
+            comptime arg_prompt: ?[]const u8,
         ) !void {
             const fields = comptime parseOptionFields(T);
             const header_tmpl =
@@ -201,7 +201,13 @@ fn StructArguments(comptime T: type) type {
                 \\ OPTIONS:
                 \\
             ;
-            const header = try std.fmt.allocPrint(self.allocator, header_tmpl, .{ self.program, arg_prompt orelse "" });
+            const header = try std.fmt.allocPrint(self.allocator, header_tmpl, .{
+                self.program,
+                if (arg_prompt) |p|
+                    "[--] " ++ p
+                else
+                    "",
+            });
             defer self.allocator.free(header);
 
             try writer.writeAll(header);
@@ -360,12 +366,10 @@ fn OptionParser(
         // State machine used to parse arguments. Available state transitions:
         // 1. start -> args
         // 2. start -> waitValue -> .. -> waitValue --> args -> ... -> args
-        // 3. start -> waitBoolValue
-        // 4. start
+        // 3. start
         const ParseState = enum {
             start,
             waitValue,
-            waitBoolValue,
             args,
         };
 
@@ -408,6 +412,11 @@ fn OptionParser(
 
                 switch (state) {
                     .start => {
+                        // From now on, all arguments are positional arguments
+                        if (std.mem.eql(u8, arg, "--")) {
+                            state = .args;
+                            continue;
+                        }
                         if (!std.mem.startsWith(u8, arg, "-")) {
                             // no option any more, the rest are positional args
                             state = .args;
@@ -447,27 +456,16 @@ fn OptionParser(
                         };
 
                         if (opt.opt_type == .Bool or opt.opt_type == .RequiredBool) {
-                            state = .waitBoolValue;
+                            opt.is_set = try Self.setOptionValue(&result.args, opt.long_name, "true");
+                            // reset to initial status
+                            state = .start;
+                            current_opt = null;
                         } else {
                             state = .waitValue;
                         }
                     },
                     .args => {
                         try result.positional_args.append(arg);
-                    },
-                    .waitBoolValue => {
-                        var opt = current_opt.?;
-                        // meet next option name, set current option value to true directly
-                        if (std.mem.startsWith(u8, arg, "-")) {
-                            // push back current arg
-                            arg_idx -= 1;
-                            opt.is_set = try Self.setOptionValue(&result.args, opt.long_name, "true");
-                        } else {
-                            opt.is_set = try Self.setOptionValue(&result.args, opt.long_name, arg);
-                        }
-                        // reset to initial status
-                        state = .start;
-                        current_opt = null;
                     },
                     .waitValue => {
                         var opt = current_opt.?;
@@ -482,10 +480,6 @@ fn OptionParser(
             switch (state) {
                 // normal exit state
                 .start, .args => {},
-                .waitBoolValue => {
-                    var opt = current_opt.?;
-                    opt.is_set = try Self.setOptionValue(&result.args, opt.long_name, "true");
-                },
                 .waitValue => return error.MissingOptionValue,
             }
 
@@ -600,7 +594,7 @@ test "parse/valid option values" {
     try opt.print_help(help_msg.writer(), "...");
     try std.testing.expectEqualStrings(
         \\ USAGE:
-        \\     awesome-cli [OPTIONS] ...
+        \\     awesome-cli [OPTIONS] [--] ...
         \\
         \\ OPTIONS:
         \\	-h, --help                        print this help message(required)
@@ -750,7 +744,7 @@ test "parse/default value" {
     try opt.print_help(help_msg.writer(), "...");
     try std.testing.expectEqualStrings(
         \\ USAGE:
-        \\     awesome-cli [OPTIONS] ...
+        \\     awesome-cli [OPTIONS] [--] ...
         \\
         \\ OPTIONS:
         \\	    --a1 STRING                   (default: A1)
@@ -781,18 +775,54 @@ test "parse/enum option" {
         a3: enum { X, Y },
     }).init(allocator, &args);
     const opt = try parser.parse();
+    defer opt.deinit();
+
     try std.testing.expectEqual(opt.args.a1, .A);
     var help_msg = std.ArrayList(u8).init(allocator);
     defer help_msg.deinit();
     try opt.print_help(help_msg.writer(), "...");
     try std.testing.expectEqualStrings(
         \\ USAGE:
-        \\     awesome-cli [OPTIONS] ...
+        \\     awesome-cli [OPTIONS] [--] ...
         \\
         \\ OPTIONS:
         \\	    --a1 STRING                    (valid: A|B)(default: A)
         \\	    --a2 STRING                    (valid: C|D)(default: D)
         \\	    --a3 STRING                    (valid: X|Y)(required)
+        \\
+    , help_msg.items);
+}
+
+test "parse/positional arguments" {
+    const allocator = std.testing.allocator;
+    var args = [_][:0]u8{
+        try allocator.dupeZ(u8, "awesome-cli"),
+        try allocator.dupeZ(u8, "--"),
+        try allocator.dupeZ(u8, "-a"),
+        try allocator.dupeZ(u8, "2"),
+    };
+    defer for (args) |arg| {
+        allocator.free(arg);
+    };
+    var parser = OptionParser(struct {
+        a: u8 = 1,
+    }).init(allocator, &args);
+    const opt = try parser.parse();
+    defer opt.deinit();
+
+    try std.testing.expectEqual(opt.args.a, 1);
+    try std.testing.expectEqual(opt.positional_args.items.len, 2);
+    try std.testing.expectEqualStrings(opt.positional_args.items[0], "-a");
+    try std.testing.expectEqualStrings(opt.positional_args.items[1], "2");
+    var help_msg = std.ArrayList(u8).init(allocator);
+    defer help_msg.deinit();
+    try opt.print_help(help_msg.writer(), "...");
+    try std.testing.expectEqualStrings(
+        \\ USAGE:
+        \\     awesome-cli [OPTIONS] [--] ...
+        \\
+        \\ OPTIONS:
+        \\	    --a INTEGER                   (default: 1)
         \\
     , help_msg.items);
 }

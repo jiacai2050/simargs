@@ -15,10 +15,9 @@ A simple, opinionated, struct-based argument parser in Zig, taking full advantag
   - All [[https://ziglang.org/documentation/master/#Primitive-Types][primitive types]], such as =i8=, =f32=, =bool=
   - =[]const u8=
   - =Enum=
-- For bool option, =-h=, =-h 1= and =-h true= all mean =true=
 - Optional fields and fields with default value mean they are optional arguments
 - Use =comptime= as possible as I can
-- Provide =print_help(writer)= out of the box
+- Provide =print_help()= out of the box
 * Usage
 See [[file:demo.zig]]
 
@@ -34,7 +33,7 @@ zig build && ./zig-out/bin/demo -o /tmp/a.out --user-agent Firefox hello world 2
 
 ------------------------------Arguments------------------------------
    verbose: null
-user-agent: demo.main__struct_1542.main__struct_1542__enum_1631.Firefox
+user-agent: demo.main__struct_1543.main__struct_1543__enum_1632.Firefox
    timeout: 30
     output: /tmp/a.out
 
@@ -44,7 +43,7 @@ user-agent: demo.main__struct_1542.main__struct_1542__enum_1631.Firefox
 
 ------------------------------print_help------------------------------
  USAGE:
-     ./zig-out/bin/demo [OPTIONS] [file]
+     ./zig-out/bin/demo [OPTIONS] [--] [file]
 
  OPTIONS:
 	-v, --verbose                     Make the operation more talkative
