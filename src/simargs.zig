@@ -143,34 +143,71 @@ fn StructArguments(comptime T: type) type {
         positional_args: std.ArrayList([]const u8),
         allocator: std.mem.Allocator,
 
-        pub fn deinit(self: @This()) void {
+        const Self = @This();
+
+        pub fn deinit(self: Self) void {
             self.positional_args.deinit();
             if (!@import("builtin").is_test) {
                 std.process.argsFree(self.allocator, self.raw_args);
             }
         }
 
+        fn print_default(comptime f: std.builtin.Type.StructField, writer: anytype) !void {
+            if (f.default_value == null) {
+                if (@typeInfo(f.field_type) != .Optional) {
+                    try writer.writeAll("(required)");
+                }
+                return;
+            }
+
+            // Don't print default for false (?)bool
+            const default = @ptrCast(*align(1) const f.field_type, f.default_value.?).*;
+            switch (@typeInfo(f.field_type)) {
+                .Bool => if (!default) return,
+                .Optional => |opt| if (@typeInfo(opt.child) == .Bool)
+                    if (!default.?) return,
+                else => {},
+            }
+
+            const format = "(default: " ++ switch (f.field_type) {
+                []const u8 => "{s}",
+                ?[]const u8 => "{?s}",
+                else => if (@typeInfo(getRealType(f.field_type)) == .Enum)
+                    "{s}"
+                else
+                    "{any}",
+            } ++ ")";
+
+            try std.fmt.format(writer, format, .{switch (@typeInfo(f.field_type)) {
+                .Enum => @tagName(default),
+                .Optional => |opt| if (@typeInfo(opt.child) == .Enum)
+                    @tagName(default.?)
+                else
+                    default,
+                else => default,
+            }});
+        }
+
         pub fn print_help(
-            self: @This(),
+            self: Self,
             writer: anytype,
+            arg_prompt: ?[]const u8,
         ) !void {
             const fields = comptime parseOptionFields(T);
             const header_tmpl =
                 \\ USAGE:
-                \\     {s} [OPTIONS] ...
+                \\     {s} [OPTIONS] {s}
                 \\
                 \\ OPTIONS:
                 \\
             ;
-            const header = try std.fmt.allocPrint(self.allocator, header_tmpl, .{
-                self.program,
-            });
+            const header = try std.fmt.allocPrint(self.allocator, header_tmpl, .{ self.program, arg_prompt orelse "" });
             defer self.allocator.free(header);
 
             try writer.writeAll(header);
             // TODO: Maybe be too small(or big)?
             const msg_offset = 35;
-            inline for (fields) |opt_fld| {
+            for (fields) |opt_fld| {
                 var curr_opt = std.ArrayList([]const u8).init(self.allocator);
                 defer curr_opt.deinit();
 
@@ -197,7 +234,6 @@ fn StructArguments(comptime T: type) type {
 
                 if (opt_fld.message) |msg| {
                     try curr_opt.append(msg);
-                    try curr_opt.append(" ");
                 }
                 const first_part = try std.mem.join(self.allocator, "", curr_opt.items);
                 defer self.allocator.free(first_part);
@@ -209,30 +245,15 @@ fn StructArguments(comptime T: type) type {
                         if (@typeInfo(real_type) == .Enum) {
                             const enum_opts = try std.mem.join(self.allocator, "|", std.meta.fieldNames(real_type));
                             defer self.allocator.free(enum_opts);
-                            try writer.writeAll("(valid: ");
+                            try writer.writeAll(" (valid: ");
                             try writer.writeAll(enum_opts);
                             try writer.writeAll(")");
                         }
-                        if (f.default_value) |v| {
-                            const default = @ptrCast(*align(1) const f.field_type, v).*;
-                            const format = "(default: " ++ switch (f.field_type) {
-                                []const u8 => "{s}",
-                                ?[]const u8 => "{?s}",
-                                else => if (@typeInfo(f.field_type) == .Enum)
-                                    "{s}"
-                                else
-                                    "{any}",
-                            } ++ ")";
 
-                            try std.fmt.format(writer, format, .{if (@typeInfo(f.field_type) == .Enum)
-                                @tagName(default)
-                            else
-                                default});
-                        } else {
-                            if (opt_fld.opt_type.is_required()) {
-                                try writer.writeAll("(required)");
-                            }
-                        }
+                        try Self.print_default(
+                            f,
+                            writer,
+                        );
                     }
                 }
 
@@ -291,11 +312,11 @@ const OptionType = enum(u32) {
 
     fn as_string(self: Self) []const u8 {
         return switch (self) {
-            .Int, .RequiredInt => "=INTEGER",
+            .Int, .RequiredInt => " INTEGER",
             .Bool, .RequiredBool => "",
-            .Float, .RequiredFloat => "=FLOAT",
-            .String, .RequiredString => "=STRING",
-            .Enum, .RequiredEnum => "=STRING",
+            .Float, .RequiredFloat => " FLOAT",
+            .String, .RequiredString => " STRING",
+            .Enum, .RequiredEnum => " STRING",
         };
     }
 };
@@ -576,16 +597,16 @@ test "parse/valid option values" {
     var help_msg = std.ArrayList(u8).init(allocator);
     defer help_msg.deinit();
 
-    try opt.print_help(help_msg.writer());
+    try opt.print_help(help_msg.writer(), "...");
     try std.testing.expectEqualStrings(
         \\ USAGE:
         \\     awesome-cli [OPTIONS] ...
         \\
         \\ OPTIONS:
-        \\	-h, --help                        print this help message (required)
-        \\	-r, --rate=FLOAT                  (default: 2.0e+00)
-        \\	    --timeout=INTEGER             (required)
-        \\	    --user-agent=STRING           (default: Brave)
+        \\	-h, --help                        print this help message(required)
+        \\	-r, --rate FLOAT                  (default: 2.0e+00)
+        \\	    --timeout INTEGER             (required)
+        \\	    --user-agent STRING           (default: Brave)
         \\
     , help_msg.items);
 }
@@ -718,26 +739,28 @@ test "parse/default value" {
         c2: ?f16 = 2.5,
         d1: bool = true,
         d2: ?bool = false,
+
+        const __messages__ = .{ .d2 = "padding message" };
     }).init(allocator, &args);
     const opt = try parser.parse();
     try std.testing.expectEqualStrings("A1", opt.args.a1);
     try std.testing.expectEqual(opt.positional_args.items.len, 0);
     var help_msg = std.ArrayList(u8).init(allocator);
     defer help_msg.deinit();
-    try opt.print_help(help_msg.writer());
+    try opt.print_help(help_msg.writer(), "...");
     try std.testing.expectEqualStrings(
         \\ USAGE:
         \\     awesome-cli [OPTIONS] ...
         \\
         \\ OPTIONS:
-        \\	    --a1=STRING                   (default: A1)
-        \\	    --a2=STRING                   (default: A2)
-        \\	    --b1=INTEGER                  (default: 1)
-        \\	    --b2=INTEGER                  (default: 11)
-        \\	    --c1=FLOAT                    (default: 1.5e+00)
-        \\	    --c2=FLOAT                    (default: 2.5e+00)
+        \\	    --a1 STRING                   (default: A1)
+        \\	    --a2 STRING                   (default: A2)
+        \\	    --b1 INTEGER                  (default: 1)
+        \\	    --b2 INTEGER                  (default: 11)
+        \\	    --c1 FLOAT                    (default: 1.5e+00)
+        \\	    --c2 FLOAT                    (default: 2.5e+00)
         \\	    --d1                          (default: true)
-        \\	    --d2                          (default: false)
+        \\	    --d2                          padding message
         \\
     , help_msg.items);
 }
@@ -746,25 +769,30 @@ test "parse/enum option" {
     const allocator = std.testing.allocator;
     var args = [_][:0]u8{
         try allocator.dupeZ(u8, "awesome-cli"),
-        try allocator.dupeZ(u8, "--a1"),
-        try allocator.dupeZ(u8, "A"),
+        try allocator.dupeZ(u8, "--a3"),
+        try allocator.dupeZ(u8, "Y"),
     };
     defer for (args) |arg| {
         allocator.free(arg);
     };
-    var parser = OptionParser(struct { a1: enum { A, B } = .A, help: bool = false }).init(allocator, &args);
+    var parser = OptionParser(struct {
+        a1: ?enum { A, B } = .A,
+        a2: enum { C, D } = .D,
+        a3: enum { X, Y },
+    }).init(allocator, &args);
     const opt = try parser.parse();
     try std.testing.expectEqual(opt.args.a1, .A);
     var help_msg = std.ArrayList(u8).init(allocator);
     defer help_msg.deinit();
-    try opt.print_help(help_msg.writer());
+    try opt.print_help(help_msg.writer(), "...");
     try std.testing.expectEqualStrings(
         \\ USAGE:
         \\     awesome-cli [OPTIONS] ...
         \\
         \\ OPTIONS:
-        \\	    --a1=STRING                   (valid: A|B)(default: A)
-        \\	    --help                        (default: false)
+        \\	    --a1 STRING                    (valid: A|B)(default: A)
+        \\	    --a2 STRING                    (valid: C|D)(default: D)
+        \\	    --a3 STRING                    (valid: X|Y)(required)
         \\
     , help_msg.items);
 }

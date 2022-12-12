@@ -34,7 +34,7 @@ zig build && ./zig-out/bin/demo -o /tmp/a.out --user-agent Firefox hello world 2
 
 ------------------------------Arguments------------------------------
    verbose: null
-user-agent: demo.main__struct_1542.main__struct_1542__enum_1629.Firefox
+user-agent: demo.main__struct_1542.main__struct_1542__enum_1631.Firefox
    timeout: 30
     output: /tmp/a.out
 
@@ -44,13 +44,13 @@ user-agent: demo.main__struct_1542.main__struct_1542__enum_1629.Firefox
 
 ------------------------------print_help------------------------------
  USAGE:
-     ./zig-out/bin/demo [OPTIONS] ...
+     ./zig-out/bin/demo [OPTIONS] [file]
 
  OPTIONS:
 	-v, --verbose                     Make the operation more talkative
-	-A, --user-agent=STRING           (valid: Chrome|Firefox|Safari)(default: Firefox)
-	    --timeout=INTEGER             Max time this request can cost (default: 30)
-	-o, --output=STRING               Write to file instead of stdout (required)
+	-A, --user-agent STRING            (valid: Chrome|Firefox|Safari)(default: Firefox)
+	    --timeout INTEGER             Max time this request can cost(default: 30)
+	-o, --output STRING               Write to file instead of stdout(required)
 #+end_example
 * Install
 Add =simargs= to your projects via submodule, and in =build.zig= add

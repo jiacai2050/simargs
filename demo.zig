@@ -51,5 +51,5 @@ pub fn main() !void {
     // Provide a print_help util method
     std.debug.print("\n{s}print_help{s}\n", .{ sep, sep });
     const stdout = std.io.getStdOut();
-    try opt.print_help(stdout.writer());
+    try opt.print_help(stdout.writer(), "[file]");
 }
