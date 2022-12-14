@@ -43,6 +43,7 @@ pub fn main() !void {
         } ++ "\n";
         std.debug.print(format, .{ fld.name, @field(opt.args, fld.name) });
     }
+
     std.debug.print("\n{s}Positionals{s}\n", .{ sep, sep });
     for (opt.positional_args.items) |arg, idx| {
         std.debug.print("{d}: {s}\n", .{ idx + 1, arg });

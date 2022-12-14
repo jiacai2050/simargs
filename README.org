@@ -64,7 +64,7 @@ const simargs = @import("simargs");
 * Who's Using
 - [[https://github.com/jiacai2050/loc][jiacai2050/loc: Lines of code in Zig]]
 
-If you’d like to be added to this list, welcome to [[https://github.com/jiacai2050/loc/pulls][open a PR]].
+If you’d like to be added to this list, welcome to [[https://github.com/jiacai2050/simargs/pulls][open a PR]].
 * Acknowledgment
 When implement =simargs=, I refer following projects to learn how to write
 idiomatic Zig code. Big Thanks!
