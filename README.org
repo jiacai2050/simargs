@@ -10,6 +10,8 @@
 
 A simple, opinionated, struct-based argument parser in Zig, taking full advantage of [[https://kristoff.it/blog/what-is-zig-comptime/][comptime]].
 
+Blog post explaining how =simargs= is implemented:
+- [[https://en.liujiacai.net/2022/12/14/argparser-in-zig/][What I learn by implementing argparser in Zig]]
 * Features
 - Supported data type:
   - All [[https://ziglang.org/documentation/master/#Primitive-Types][primitive types]], such as =i8=, =f32=, =bool=
