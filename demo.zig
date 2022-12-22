@@ -36,7 +36,7 @@ pub fn main() !void {
     std.debug.print("{s}Program{s}\n{s}\n\n", .{ sep, sep, opt.program });
     std.debug.print("{s}Arguments{s}\n", .{ sep, sep });
     inline for (std.meta.fields(@TypeOf(opt.args))) |fld| {
-        const format = "{s:>10}: " ++ switch (fld.field_type) {
+        const format = "{s:>10}: " ++ switch (fld.type) {
             []const u8 => "{s}",
             ?[]const u8 => "{?s}",
             else => "{any}",
