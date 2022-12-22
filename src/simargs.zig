@@ -5,7 +5,7 @@ const testing = std.testing;
 
 const ParseError = error{ NoProgram, NoOption, MissingRequiredOption, MissingOptionValue, InvalidEnumValue };
 
-const OptionError = ParseError || std.mem.Allocator.Error || std.fmt.ParseIntError || std.fmt.ParseFloatError;
+const OptionError = ParseError || std.mem.Allocator.Error || std.fmt.ParseIntError || std.fmt.ParseFloatError || std.process.ArgIterator.InitError;
 
 /// Parses arguments according to the given structure.
 /// - `T` is the configuration of the arguments.

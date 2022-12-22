@@ -20,7 +20,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
+        targets: [x86_64-windows, x86_64-linux, x86_64-macos, aarch64-macos]
     steps:
       - uses: actions/checkout@v2
       - uses: goto-bus-stop/setup-zig@v1
@@ -28,8 +29,9 @@ jobs:
           version: master
       - name: Run Test
         run: zig build test
-      - name: Run demo
-        run: zig build run-demo -- -o /tmp/simargs.txt hello world
+      - name: Build demo
+        run: |
+          zig build -Dtarget=${{ matrix.targets }}
       - name: Memory leak detect
         if: matrix.os == 'ubuntu-latest'
         run: |
