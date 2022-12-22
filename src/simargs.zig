@@ -37,7 +37,7 @@ fn parseOptionFields(comptime T: type) [std.meta.fields(T).len]OptionField {
     inline for (option_type_info.Struct.fields) |fld, idx| {
         const long_name = fld.name;
         const opt_type = OptionType.from_zig_type(
-            fld.field_type,
+            fld.type,
         );
         opt_fields[idx] = .{
             .long_name = long_name,
@@ -154,31 +154,31 @@ fn StructArguments(comptime T: type) type {
 
         fn print_default(comptime f: std.builtin.Type.StructField, writer: anytype) !void {
             if (f.default_value == null) {
-                if (@typeInfo(f.field_type) != .Optional) {
+                if (@typeInfo(f.type) != .Optional) {
                     try writer.writeAll("(required)");
                 }
                 return;
             }
 
             // Don't print default for false (?)bool
-            const default = @ptrCast(*align(1) const f.field_type, f.default_value.?).*;
-            switch (@typeInfo(f.field_type)) {
+            const default = @ptrCast(*align(1) const f.type, f.default_value.?).*;
+            switch (@typeInfo(f.type)) {
                 .Bool => if (!default) return,
                 .Optional => |opt| if (@typeInfo(opt.child) == .Bool)
                     if (!default.?) return,
                 else => {},
             }
 
-            const format = "(default: " ++ switch (f.field_type) {
+            const format = "(default: " ++ switch (f.type) {
                 []const u8 => "{s}",
                 ?[]const u8 => "{?s}",
-                else => if (@typeInfo(getRealType(f.field_type)) == .Enum)
+                else => if (@typeInfo(getRealType(f.type)) == .Enum)
                     "{s}"
                 else
                     "{any}",
             } ++ ")";
 
-            try std.fmt.format(writer, format, .{switch (@typeInfo(f.field_type)) {
+            try std.fmt.format(writer, format, .{switch (@typeInfo(f.type)) {
                 .Enum => @tagName(default),
                 .Optional => |opt| if (@typeInfo(opt.child) == .Enum)
                     @tagName(default.?)
@@ -247,7 +247,7 @@ fn StructArguments(comptime T: type) type {
 
                 inline for (std.meta.fields(T)) |f| {
                     if (std.mem.eql(u8, f.name, opt_fld.long_name)) {
-                        const real_type = getRealType(f.field_type);
+                        const real_type = getRealType(f.type);
                         if (@typeInfo(real_type) == .Enum) {
                             const enum_opts = try std.mem.join(self.allocator, "|", std.meta.fieldNames(real_type));
                             defer self.allocator.free(enum_opts);
@@ -391,9 +391,9 @@ fn OptionParser(
                 if (fld.default_value) |v| {
                     // https://github.com/ziglang/zig/blob/d69e97ae1677ca487833caf6937fa428563ed0ae/lib/std/json.zig#L1590
                     // why align(1) is used here?
-                    @field(result.args, fld.name) = @ptrCast(*align(1) const fld.field_type, v).*;
+                    @field(result.args, fld.name) = @ptrCast(*align(1) const fld.type, v).*;
                 } else {
-                    if (!OptionType.from_zig_type(fld.field_type).is_required()) {
+                    if (!OptionType.from_zig_type(fld.type).is_required()) {
                         @field(result.args, fld.name) = null;
                     }
                 }
@@ -507,19 +507,19 @@ fn OptionParser(
             inline for (std.meta.fields(T)) |field| {
                 if (std.mem.eql(u8, field.name, long_name)) {
                     @field(opt, field.name) =
-                        switch (comptime OptionType.from_zig_type(field.field_type)) {
+                        switch (comptime OptionType.from_zig_type(field.type)) {
                         .Int, .RequiredInt => blk: {
-                            const real_type = comptime getRealType(field.field_type);
-                            break :blk switch (Self.getSignedness(field.field_type)) {
+                            const real_type = comptime getRealType(field.type);
+                            break :blk switch (Self.getSignedness(field.type)) {
                                 .signed => try std.fmt.parseInt(real_type, raw_value, 0),
                                 .unsigned => try std.fmt.parseUnsigned(real_type, raw_value, 0),
                             };
                         },
-                        .Float, .RequiredFloat => try std.fmt.parseFloat(comptime getRealType(field.field_type), raw_value),
+                        .Float, .RequiredFloat => try std.fmt.parseFloat(comptime getRealType(field.type), raw_value),
                         .String, .RequiredString => raw_value,
                         .Bool, .RequiredBool => std.mem.eql(u8, raw_value, "true") or std.mem.eql(u8, raw_value, "1"),
                         .Enum, .RequiredEnum => blk: {
-                            if (std.meta.stringToEnum(comptime getRealType(field.field_type), raw_value)) |v| {
+                            if (std.meta.stringToEnum(comptime getRealType(field.type), raw_value)) |v| {
                                 break :blk v;
                             } else {
                                 return error.InvalidEnumValue;
