@@ -21,7 +21,6 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        targets: [x86_64-windows, x86_64-linux, x86_64-macos, aarch64-macos]
     steps:
       - uses: actions/checkout@v2
       - uses: goto-bus-stop/setup-zig@v1
@@ -29,11 +28,7 @@ jobs:
           version: master
       - name: Run Test
         run: zig build test
-      - name: Build demo
-        run: |
-          zig build -Dtarget=${{ matrix.targets }}
       - name: Memory leak detect
-        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt update && sudo apt install -y valgrind
           zig build -Dcpu=baseline --verbose
@@ -41,3 +36,20 @@ jobs:
           valgrind --leak-check=full --tool=memcheck \
           --show-leak-kinds=all --error-exitcode=1 ${TEST_BINARY} --output a.out \
           hello world
+
+  cross-compile:
+    timeout-minutes: 10
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        targets: [x86_64-windows, x86_64-linux, x86_64-macos, aarch64-macos]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: goto-bus-stop/setup-zig@v1
+        with:
+          version: master
+      - name: Build demo
+        run: |
+          zig build -Dtarget=${{ matrix.targets }}
