@@ -1,25 +1,22 @@
 const std = @import("std");
 
-pub fn build(b: *std.build.Builder) void {
+pub fn build(b: *std.Build) void {
     // Standard release options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
-    const mode = b.standardReleaseOptions();
+    const optimize = b.standardOptimizeOption(.{});
+
     const target = b.standardTargetOptions(.{});
 
-    const lib = b.addStaticLibrary("simargs", "src/simargs.zig");
-    lib.setBuildMode(mode);
+    const lib = b.addStaticLibrary(.{ .name = "simargs", .target = target, .optimize = optimize, .root_source_file = .{ .path = "src/simargs.zig" } });
     lib.install();
 
-    const main_tests = b.addTest("src/simargs.zig");
-    main_tests.setBuildMode(mode);
+    const main_tests = b.addTest(.{ .name = "simargs_test", .kind = .test_exe, .target = target, .optimize = optimize, .root_source_file = .{ .path = "src/simargs.zig" } });
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);
 
-    const demo_exe = b.addExecutable("demo", "demo.zig");
-    demo_exe.addPackagePath("simargs", "src/simargs.zig");
-    demo_exe.setBuildMode(mode);
-    demo_exe.setTarget(target);
+    const demo_exe = b.addExecutable(.{ .name = "demo", .root_source_file = .{ .path = "demo.zig" }, .target = target, .optimize = optimize });
+    demo_exe.addAnonymousModule("simargs", .{ .source_file = .{ .path = "src/simargs.zig" } });
     demo_exe.install();
     const run_demo = demo_exe.run();
     if (b.args) |args| {

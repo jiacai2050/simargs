@@ -1,7 +1,9 @@
 const std = @import("std");
 const simargs = @import("simargs");
 
-pub const log_level: std.log.Level = .info;
+pub const std_options = struct {
+    pub const log_level: std.log.Level = .info;
+};
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);

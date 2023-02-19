@@ -35,7 +35,7 @@ zig build && ./zig-out/bin/demo -o /tmp/a.out --user-agent Firefox hello world 2
 
 ------------------------------Arguments------------------------------
    verbose: null
-user-agent: demo.main__struct_1543.main__struct_1543__enum_1632.Firefox
+user-agent: demo.main__struct_1663.main__struct_1663__enum_1761.Firefox
    timeout: 30
     output: /tmp/a.out
 
