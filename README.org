@@ -54,11 +54,30 @@ user-agent: demo.main__struct_1663.main__struct_1663__enum_1761.Firefox
 	-o, --output STRING               Write to file instead of stdout(required)
 #+end_example
 * Install
-Add =simargs= to your projects via submodule, and in =build.zig= add
+First add =simargs= to =build.zig.zon= of your project
 #+begin_src zig
-exe.addPackagePath("simargs", "libs/simargs/src/simargs.zig");
+.{
+    .name = "..",
+    .version = "..",
+    .dependencies = .{
+        .simargs = .{
+            .url = "https://github.com/jiacai2050/simargs/archive/0a1a2afd072cc915009a063075743192fc6b1fd5.tar.gz",
+            .hash = "1220a6554eccb2e9a9d7d63047e062314851ffd11315b9e6d1b5e06a9dde3275f150",
+        },
+    },
+}
+
 #+end_src
-Then import like this in your Zig code:
+Then addModule in =build.zig=
+#+begin_src zig
+    const dep_simargs = b.dependency("simargs", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.addModule("simargs", dep_simargs.module("simargs"));
+#+end_src
+
+Finally import like this in your Zig code:
 #+begin_src zig
 const simargs = @import("simargs");
 #+end_src
