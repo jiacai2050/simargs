@@ -34,7 +34,7 @@ fn parseOptionFields(comptime T: type) [std.meta.fields(T).len]OptionField {
     }
 
     var opt_fields: [std.meta.fields(T).len]OptionField = undefined;
-    inline for (option_type_info.Struct.fields) |fld, idx| {
+    inline for (option_type_info.Struct.fields, 0..) |fld, idx| {
         const long_name = fld.name;
         const opt_type = OptionType.from_zig_type(
             fld.type,
@@ -56,7 +56,7 @@ fn parseOptionFields(comptime T: type) [std.meta.fields(T).len]OptionField {
 
         comptime inline for (std.meta.fields(shorts_type)) |fld| {
             const long_name = fld.name;
-            inline for (opt_fields) |*opt_fld| {
+            inline for (&opt_fields) |*opt_fld| {
                 if (std.mem.eql(u8, opt_fld.long_name, long_name)) {
                     const short_name = @field(T.__shorts__, long_name);
                     if (@typeInfo(@TypeOf(short_name)) != .EnumLiteral) {
@@ -81,7 +81,7 @@ fn parseOptionFields(comptime T: type) [std.meta.fields(T).len]OptionField {
 
         inline for (std.meta.fields(messages_type)) |fld| {
             const long_name = fld.name;
-            inline for (opt_fields) |*opt_fld| {
+            inline for (&opt_fields) |*opt_fld| {
                 if (std.mem.eql(u8, opt_fld.long_name, long_name)) {
                     opt_fld.message = @field(T.__messages__, long_name);
                     break;
@@ -427,7 +427,7 @@ fn OptionParser(
                         if (std.mem.startsWith(u8, arg[1..], "-")) {
                             // long option
                             const long_name = arg[2..];
-                            for (self.opt_fields) |*opt_fld| {
+                            for (&self.opt_fields) |*opt_fld| {
                                 if (std.mem.eql(u8, opt_fld.long_name, long_name)) {
                                     current_opt = opt_fld;
                                     break;
@@ -440,7 +440,7 @@ fn OptionParser(
                                 std.log.warn("No such short option, name:{s}", .{arg});
                                 return error.NoOption;
                             }
-                            for (self.opt_fields) |*opt| {
+                            for (&self.opt_fields) |*opt| {
                                 if (opt.short_name) |name| {
                                     if (name == short_name[0]) {
                                         current_opt = opt;

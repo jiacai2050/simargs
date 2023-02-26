@@ -47,7 +47,7 @@ pub fn main() !void {
     }
 
     std.debug.print("\n{s}Positionals{s}\n", .{ sep, sep });
-    for (opt.positional_args.items) |arg, idx| {
+    for (opt.positional_args.items, 0..) |arg, idx| {
         std.debug.print("{d}: {s}\n", .{ idx + 1, arg });
     }
 
