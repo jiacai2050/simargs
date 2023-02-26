@@ -1,16 +1,19 @@
 const std = @import("std");
 
+const MODULE = "simargs";
 pub fn build(b: *std.Build) void {
-    // Standard release options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const optimize = b.standardOptimizeOption(.{});
-
     const target = b.standardTargetOptions(.{});
 
-    const lib = b.addStaticLibrary(.{ .name = "simargs", .target = target, .optimize = optimize, .root_source_file = .{ .path = "src/simargs.zig" } });
+    const lib = b.addStaticLibrary(.{ .name = MODULE, .target = target, .optimize = optimize, .root_source_file = .{ .path = "src/simargs.zig" } });
     lib.install();
 
-    const main_tests = b.addTest(.{ .name = "simargs_test", .kind = .test_exe, .target = target, .optimize = optimize, .root_source_file = .{ .path = "src/simargs.zig" } });
+    b.addModule(.{
+        .name = MODULE,
+        .source_file = .{ .path = "src/simargs.zig" },
+    });
+
+    const main_tests = b.addTest(.{ .target = target, .optimize = optimize, .root_source_file = .{ .path = "src/simargs.zig" } });
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);
