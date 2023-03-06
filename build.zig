@@ -8,8 +8,7 @@ pub fn build(b: *std.Build) void {
     const lib = b.addStaticLibrary(.{ .name = MODULE, .target = target, .optimize = optimize, .root_source_file = .{ .path = "src/simargs.zig" } });
     lib.install();
 
-    b.addModule(.{
-        .name = MODULE,
+    _ = b.addModule(MODULE, .{
         .source_file = .{ .path = "src/simargs.zig" },
     });
 
