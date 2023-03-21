@@ -83,7 +83,7 @@ const simargs = @import("simargs");
 #+end_src
 
 * Who's Using
-- [[https://github.com/jiacai2050/loc][jiacai2050/loc: Lines of code in Zig]]
+- [[https://github.com/jiacai2050/zigcli][jiacai2050/zigcli: Command line programs written in Zig.]]
 
 If you’d like to be added to this list, welcome to [[https://github.com/jiacai2050/simargs/pulls][open a PR]].
 * Acknowledgment
