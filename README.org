@@ -35,9 +35,10 @@ zig build && ./zig-out/bin/demo -o /tmp/a.out --user-agent Firefox hello world 2
 
 ------------------------------Arguments------------------------------
    verbose: null
-user-agent: demo.main__struct_1663.main__struct_1663__enum_1761.Firefox
+user-agent: demo.main__struct_1677.main__struct_1677__enum_1777.Firefox
    timeout: 30
     output: /tmp/a.out
+      help: false
 
 ------------------------------Positionals------------------------------
 1: hello
@@ -52,6 +53,7 @@ user-agent: demo.main__struct_1663.main__struct_1663__enum_1761.Firefox
 	-A, --user-agent STRING            (valid: Chrome|Firefox|Safari)(default: Firefox)
 	    --timeout INTEGER             Max time this request can cost(default: 30)
 	-o, --output STRING               Write to file instead of stdout(required)
+	-h, --help
 #+end_example
 * Install
 First add =simargs= to =build.zig.zon= of your project

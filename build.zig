@@ -5,15 +5,14 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const target = b.standardTargetOptions(.{});
 
-    const source_file = std.Build.FileSource.relative("src/simargs.zig");
     const simargs_dep = b.addModule(MODULE, .{
-        .source_file = source_file,
+        .source_file = .{ .path = "src/simargs.zig" },
     });
 
     // Test
-    const main_tests = b.addTest(.{ .root_source_file = source_file });
+    const tests = b.addTest(.{ .root_source_file = .{ .path = "src/simargs.zig" } });
     const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&main_tests.step);
+    test_step.dependOn(&tests.run().step);
 
     // Demo
     const demo_exe = b.addExecutable(.{ .name = "demo", .root_source_file = .{ .path = "demo.zig" }, .target = target, .optimize = optimize });

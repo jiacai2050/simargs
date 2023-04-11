@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const testing = std.testing;
+const is_test = @import("builtin").is_test;
 
 const ParseError = error{ NoProgram, NoOption, MissingRequiredOption, MissingOptionValue, InvalidEnumValue };
 
@@ -12,10 +13,11 @@ const OptionError = ParseError || std.mem.Allocator.Error || std.fmt.ParseIntErr
 pub fn parse(
     allocator: std.mem.Allocator,
     comptime T: type,
-) OptionError!StructArguments(T) {
+    comptime arg_prompt: ?[]const u8,
+) OptionError!StructArguments(T, arg_prompt) {
     const args = try std.process.argsAlloc(allocator);
     var parser = OptionParser(T).init(allocator, args);
-    return parser.parse();
+    return parser.parse(arg_prompt);
 }
 
 const OptionField = struct {
@@ -111,35 +113,32 @@ test "parse option fields" {
         };
     });
 
-    try std.testing.expectEqual(4, fields.len);
-    const first_opt = OptionField{ .long_name = "verbose", .short_name = 'v', .message = "show verbose log", .opt_type = .RequiredBool };
-    try std.testing.expectEqualStrings(first_opt.long_name, fields[0].long_name);
-    try std.testing.expectEqual(first_opt.message, fields[0].message);
-    try std.testing.expectEqual(first_opt.short_name, fields[0].short_name);
-    try std.testing.expectEqual(first_opt.opt_type, fields[0].opt_type);
-    try std.testing.expectEqual(first_opt.is_set, fields[0].is_set);
-    const last_opt = OptionField{ .long_name = "user-agent", .opt_type = .String };
-    try std.testing.expectEqualStrings(last_opt.long_name, fields[3].long_name);
-    try std.testing.expectEqual(last_opt.message, fields[3].message);
-    try std.testing.expectEqual(last_opt.short_name, fields[3].short_name);
-    try std.testing.expectEqual(last_opt.opt_type, fields[3].opt_type);
-    try std.testing.expectEqual(last_opt.is_set, fields[3].is_set);
+    try std.testing.expectEqualDeep([4]OptionField{
+        .{ .long_name = "verbose", .short_name = 'v', .message = "show verbose log", .opt_type = .RequiredBool },
+        .{ .long_name = "help", .opt_type = .Bool },
+        .{ .long_name = "timeout", .opt_type = .RequiredInt },
+        .{ .long_name = "user-agent", .opt_type = .String },
+    }, fields);
 }
 
-fn getRealType(comptime opt_type: type) type {
+fn NonOptionType(comptime opt_type: type) type {
     return switch (@typeInfo(opt_type)) {
-        .Optional => |o| getRealType(o.child),
+        .Optional => |o| NonOptionType(o.child),
         else => opt_type,
     };
 }
 
-fn StructArguments(comptime T: type) type {
+fn StructArguments(
+    comptime T: type,
+    comptime arg_prompt: ?[]const u8,
+) type {
     return struct {
         program: []const u8,
         // Parsed arguments
         args: T,
         // Unparsed arguments
         raw_args: [][:0]u8,
+        comptime arg_prompt: ?[]const u8 = null,
         positional_args: std.ArrayList([]const u8),
         allocator: std.mem.Allocator,
 
@@ -147,7 +146,7 @@ fn StructArguments(comptime T: type) type {
 
         pub fn deinit(self: Self) void {
             self.positional_args.deinit();
-            if (!@import("builtin").is_test) {
+            if (!is_test) {
                 std.process.argsFree(self.allocator, self.raw_args);
             }
         }
@@ -172,7 +171,7 @@ fn StructArguments(comptime T: type) type {
             const format = "(default: " ++ switch (f.type) {
                 []const u8 => "{s}",
                 ?[]const u8 => "{?s}",
-                else => if (@typeInfo(getRealType(f.type)) == .Enum)
+                else => if (@typeInfo(NonOptionType(f.type)) == .Enum)
                     "{s}"
                 else
                     "{any}",
@@ -191,7 +190,6 @@ fn StructArguments(comptime T: type) type {
         pub fn print_help(
             self: Self,
             writer: anytype,
-            comptime arg_prompt: ?[]const u8,
         ) !void {
             const fields = comptime parseOptionFields(T);
             const header_tmpl =
@@ -247,7 +245,7 @@ fn StructArguments(comptime T: type) type {
 
                 inline for (std.meta.fields(T)) |f| {
                     if (std.mem.eql(u8, f.name, opt_fld.long_name)) {
-                        const real_type = getRealType(f.type);
+                        const real_type = NonOptionType(f.type);
                         if (@typeInfo(real_type) == .Enum) {
                             const enum_opts = try std.mem.join(self.allocator, "|", std.meta.fieldNames(real_type));
                             defer self.allocator.free(enum_opts);
@@ -344,6 +342,7 @@ test "parse OptionType" {
     }
 }
 
+/// `T` is a struct, which define options
 fn OptionParser(
     comptime T: type,
 ) type {
@@ -354,7 +353,6 @@ fn OptionParser(
 
         const Self = @This();
 
-        // `T` is a struct, which define options
         fn init(allocator: std.mem.Allocator, args: [][:0]u8) Self {
             return .{
                 .allocator = allocator,
@@ -363,7 +361,8 @@ fn OptionParser(
             };
         }
 
-        // State machine used to parse arguments. Available state transitions:
+        // State machine used to parse arguments.
+        // Available state transitions:
         // 1. start -> args
         // 2. start -> waitValue -> .. -> waitValue --> args -> ... -> args
         // 3. start
@@ -373,12 +372,15 @@ fn OptionParser(
             args,
         };
 
-        fn parse(self: *Self) OptionError!StructArguments(T) {
+        fn parse(
+            self: *Self,
+            comptime arg_prompt: ?[]const u8,
+        ) OptionError!StructArguments(T, arg_prompt) {
             if (self.args.len == 0) {
                 return error.NoProgram;
             }
 
-            var result = StructArguments(T){
+            var result = StructArguments(T, arg_prompt){
                 .program = self.args[0],
                 .allocator = self.allocator,
                 .args = undefined,
@@ -406,9 +408,6 @@ fn OptionParser(
             while (arg_idx < self.args.len) {
                 const arg = self.args[arg_idx];
                 arg_idx += 1;
-                std.log.debug("state:{s}, arg:{s}", .{ @tagName(
-                    state,
-                ), arg });
 
                 switch (state) {
                     .start => {
@@ -451,7 +450,7 @@ fn OptionParser(
                         }
 
                         var opt = current_opt orelse {
-                            std.log.warn("Current option is null, option_name:{s}", .{arg});
+                            std.log.warn("Unknown option, name:{s}", .{arg});
                             return error.NoOption;
                         };
 
@@ -460,6 +459,13 @@ fn OptionParser(
                             // reset to initial status
                             state = .start;
                             current_opt = null;
+
+                            // if current option is help, print help_message and exit directly.
+                            if (!is_test and std.mem.eql(u8, opt.long_name, "help")) {
+                                const stdout = std.io.getStdOut();
+                                result.print_help(stdout.writer()) catch @panic("OOM");
+                                std.process.exit(0);
+                            }
                         } else {
                             state = .waitValue;
                         }
@@ -509,17 +515,17 @@ fn OptionParser(
                     @field(opt, field.name) =
                         switch (comptime OptionType.from_zig_type(field.type)) {
                         .Int, .RequiredInt => blk: {
-                            const real_type = comptime getRealType(field.type);
+                            const real_type = comptime NonOptionType(field.type);
                             break :blk switch (Self.getSignedness(field.type)) {
                                 .signed => try std.fmt.parseInt(real_type, raw_value, 0),
                                 .unsigned => try std.fmt.parseUnsigned(real_type, raw_value, 0),
                             };
                         },
-                        .Float, .RequiredFloat => try std.fmt.parseFloat(comptime getRealType(field.type), raw_value),
+                        .Float, .RequiredFloat => try std.fmt.parseFloat(comptime NonOptionType(field.type), raw_value),
                         .String, .RequiredString => raw_value,
                         .Bool, .RequiredBool => std.mem.eql(u8, raw_value, "true") or std.mem.eql(u8, raw_value, "1"),
                         .Enum, .RequiredEnum => blk: {
-                            if (std.meta.stringToEnum(comptime getRealType(field.type), raw_value)) |v| {
+                            if (std.meta.stringToEnum(comptime NonOptionType(field.type), raw_value)) |v| {
                                 break :blk v;
                             } else {
                                 return error.InvalidEnumValue;
@@ -570,28 +576,26 @@ test "parse/valid option values" {
     };
 
     var parser = OptionParser(TestArguments).init(allocator, &args);
-    const opt = try parser.parse();
+    const opt = try parser.parse("...");
     defer opt.deinit();
 
-    // Can't compare struct directly, See following issue
-    // https://github.com/ziglang/zig/issues/12451
-    // try std.testing.expectEqual(opt.args, TestArguments{
-    //     .help = true,
-    //     .rate = 1.2,
-    //     .timeout = 30,
-    //     .@"user-agent" = "firefox",
-    // });
-    try std.testing.expectEqual(true, opt.args.help);
-    try std.testing.expectEqual(opt.args.rate.?, 1.2);
-    try std.testing.expectEqual(opt.args.timeout, 30);
-    try std.testing.expectEqualStrings("firefox", opt.args.@"user-agent".?);
-    try std.testing.expectEqualStrings("hello", opt.positional_args.items[0]);
-    try std.testing.expectEqualStrings("world", opt.positional_args.items[1]);
+    try std.testing.expectEqualDeep(TestArguments{
+        .help = true,
+        .rate = 1.2,
+        .timeout = 30,
+        .@"user-agent" = "firefox",
+    }, opt.args);
+
+    var expected = [_][]const u8{ "hello", "world" };
+    try std.testing.expectEqualDeep(
+        opt.positional_args.items,
+        &expected,
+    );
 
     var help_msg = std.ArrayList(u8).init(allocator);
     defer help_msg.deinit();
 
-    try opt.print_help(help_msg.writer(), "...");
+    try opt.print_help(help_msg.writer());
     try std.testing.expectEqualStrings(
         \\ USAGE:
         \\     awesome-cli [OPTIONS] [--] ...
@@ -616,10 +620,11 @@ test "parse/bool value" {
             allocator.free(arg);
         };
         var parser = OptionParser(struct { help: bool }).init(allocator, &args);
-        const opt = try parser.parse();
+        const opt = try parser.parse(null);
         defer opt.deinit();
 
-        try std.testing.expectEqual(true, opt.args.help);
+        try std.testing.expectEqual(opt.args, .{ .help = true });
+        try std.testing.expectEqual(opt.positional_args.items, &[_][]const u8{});
     }
     {
         var args = [_][:0]u8{
@@ -631,10 +636,17 @@ test "parse/bool value" {
             allocator.free(arg);
         };
         var parser = OptionParser(struct { help: bool }).init(allocator, &args);
-        const opt = try parser.parse();
+        const opt = try parser.parse(null);
         defer opt.deinit();
 
-        try std.testing.expectEqual(true, opt.args.help);
+        try std.testing.expectEqual(opt.args, .{ .help = true });
+        var expected = [_][]const u8{
+            "true",
+        };
+        try std.testing.expectEqualDeep(
+            opt.positional_args.items,
+            &expected,
+        );
     }
 }
 
@@ -649,7 +661,7 @@ test "parse/missing required arguments" {
     };
     var parser = OptionParser(TestArguments).init(allocator, &args);
 
-    try std.testing.expectError(error.MissingRequiredOption, parser.parse());
+    try std.testing.expectError(error.MissingRequiredOption, parser.parse(null));
 }
 
 test "parse/invalid u16 values" {
@@ -665,7 +677,7 @@ test "parse/invalid u16 values" {
     };
     var parser = OptionParser(TestArguments).init(allocator, &args);
 
-    try std.testing.expectError(error.InvalidCharacter, parser.parse());
+    try std.testing.expectError(error.InvalidCharacter, parser.parse(null));
 }
 
 test "parse/invalid f32 values" {
@@ -681,7 +693,7 @@ test "parse/invalid f32 values" {
     };
     var parser = OptionParser(TestArguments).init(allocator, &args);
 
-    try std.testing.expectError(error.InvalidCharacter, parser.parse());
+    try std.testing.expectError(error.InvalidCharacter, parser.parse(null));
 }
 
 test "parse/unknown option" {
@@ -698,7 +710,7 @@ test "parse/unknown option" {
     };
     var parser = OptionParser(TestArguments).init(allocator, &args);
 
-    try std.testing.expectError(error.NoOption, parser.parse());
+    try std.testing.expectError(error.NoOption, parser.parse(null));
 }
 
 test "parse/missing option value" {
@@ -713,7 +725,7 @@ test "parse/missing option value" {
     };
     var parser = OptionParser(TestArguments).init(allocator, &args);
 
-    try std.testing.expectError(error.MissingOptionValue, parser.parse());
+    try std.testing.expectError(error.MissingOptionValue, parser.parse(null));
 }
 
 test "parse/default value" {
@@ -736,12 +748,12 @@ test "parse/default value" {
 
         const __messages__ = .{ .d2 = "padding message" };
     }).init(allocator, &args);
-    const opt = try parser.parse();
+    const opt = try parser.parse("...");
     try std.testing.expectEqualStrings("A1", opt.args.a1);
     try std.testing.expectEqual(opt.positional_args.items.len, 0);
     var help_msg = std.ArrayList(u8).init(allocator);
     defer help_msg.deinit();
-    try opt.print_help(help_msg.writer(), "...");
+    try opt.print_help(help_msg.writer());
     try std.testing.expectEqualStrings(
         \\ USAGE:
         \\     awesome-cli [OPTIONS] [--] ...
@@ -774,13 +786,13 @@ test "parse/enum option" {
         a2: enum { C, D } = .D,
         a3: enum { X, Y },
     }).init(allocator, &args);
-    const opt = try parser.parse();
+    const opt = try parser.parse("...");
     defer opt.deinit();
 
     try std.testing.expectEqual(opt.args.a1, .A);
     var help_msg = std.ArrayList(u8).init(allocator);
     defer help_msg.deinit();
-    try opt.print_help(help_msg.writer(), "...");
+    try opt.print_help(help_msg.writer());
     try std.testing.expectEqualStrings(
         \\ USAGE:
         \\     awesome-cli [OPTIONS] [--] ...
@@ -807,16 +819,16 @@ test "parse/positional arguments" {
     var parser = OptionParser(struct {
         a: u8 = 1,
     }).init(allocator, &args);
-    const opt = try parser.parse();
+    const opt = try parser.parse("...");
     defer opt.deinit();
 
-    try std.testing.expectEqual(opt.args.a, 1);
-    try std.testing.expectEqual(opt.positional_args.items.len, 2);
-    try std.testing.expectEqualStrings(opt.positional_args.items[0], "-a");
-    try std.testing.expectEqualStrings(opt.positional_args.items[1], "2");
+    try std.testing.expectEqualDeep(opt.args, .{ .a = 1 });
+    var expected = [_][]const u8{ "-a", "2" };
+    try std.testing.expectEqualDeep(opt.positional_args.items, &expected);
+
     var help_msg = std.ArrayList(u8).init(allocator);
     defer help_msg.deinit();
-    try opt.print_help(help_msg.writer(), "...");
+    try opt.print_help(help_msg.writer());
     try std.testing.expectEqualStrings(
         \\ USAGE:
         \\     awesome-cli [OPTIONS] [--] ...

@@ -17,12 +17,14 @@ pub fn main() !void {
         @"user-agent": enum { Chrome, Firefox, Safari } = .Firefox,
         timeout: ?u16 = 30, // default value
         output: []const u8,
+        help: bool = false,
 
         // This declares option's short name
         pub const __shorts__ = .{
             .verbose = .v,
             .output = .o,
             .@"user-agent" = .A,
+            .help = .h,
         };
 
         // This declares option's help message
@@ -31,7 +33,7 @@ pub fn main() !void {
             .output = "Write to file instead of stdout",
             .timeout = "Max time this request can cost",
         };
-    });
+    }, "[file]");
     defer opt.deinit();
 
     const sep = "-" ** 30;
@@ -54,5 +56,5 @@ pub fn main() !void {
     // Provide a print_help util method
     std.debug.print("\n{s}print_help{s}\n", .{ sep, sep });
     const stdout = std.io.getStdOut();
-    try opt.print_help(stdout.writer(), "[file]");
+    try opt.print_help(stdout.writer());
 }
