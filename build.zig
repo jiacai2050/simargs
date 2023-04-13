@@ -12,13 +12,13 @@ pub fn build(b: *std.Build) void {
     // Test
     const tests = b.addTest(.{ .root_source_file = .{ .path = "src/simargs.zig" } });
     const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&tests.run().step);
+    test_step.dependOn(&b.addRunArtifact(tests).step);
 
     // Demo
     const demo_exe = b.addExecutable(.{ .name = "demo", .root_source_file = .{ .path = "demo.zig" }, .target = target, .optimize = optimize });
     demo_exe.addModule("simargs", simargs_dep);
-    demo_exe.install();
-    const run_demo = demo_exe.run();
+    b.installArtifact(demo_exe);
+    const run_demo = b.addRunArtifact(demo_exe);
     if (b.args) |args| {
         run_demo.addArgs(args);
     }
