@@ -56,7 +56,7 @@ fn parseOptionFields(comptime T: type) [std.meta.fields(T).len]OptionField {
             @compileError("__shorts__ should be defined using struct, found " ++ @typeName(@typeInfo(shorts_type)));
         }
 
-        comptime inline for (std.meta.fields(shorts_type)) |fld| {
+        inline for (std.meta.fields(shorts_type)) |fld| {
             const long_name = fld.name;
             inline for (&opt_fields) |*opt_fld| {
                 if (std.mem.eql(u8, opt_fld.long_name, long_name)) {
@@ -71,7 +71,7 @@ fn parseOptionFields(comptime T: type) [std.meta.fields(T).len]OptionField {
             } else {
                 @compileError("no such option exists, long_name: " ++ long_name);
             }
-        };
+        }
     }
 
     // parse messages
