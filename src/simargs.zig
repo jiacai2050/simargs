@@ -164,7 +164,7 @@ fn StructArguments(
             switch (@typeInfo(f.type)) {
                 .Bool => if (!default) return,
                 .Optional => |opt| if (@typeInfo(opt.child) == .Bool)
-                    if (!default.?) return,
+                    if (!(default orelse false)) return,
                 else => {},
             }
 
@@ -380,26 +380,27 @@ fn OptionParser(
                 return error.NoProgram;
             }
 
+            var args: T = undefined;
+            inline for (std.meta.fields(T)) |fld| {
+                if (fld.default_value) |v| {
+                    // https://github.com/ziglang/zig/blob/d69e97ae1677ca487833caf6937fa428563ed0ae/lib/std/json.zig#L1590
+                    // why align(1) is used here?
+                    @field(args, fld.name) = @ptrCast(*align(1) const fld.type, v).*;
+                } else {
+                    const is_option = !comptime OptionType.from_zig_type(fld.type).is_required();
+                    if (is_option) {
+                        @field(args, fld.name) = null;
+                    }
+                }
+            }
             var result = StructArguments(T, arg_prompt){
                 .program = self.args[0],
                 .allocator = self.allocator,
-                .args = undefined,
+                .args = args,
                 .positional_args = std.ArrayList([]const u8).init(self.allocator),
                 .raw_args = self.args,
             };
             errdefer result.deinit();
-
-            comptime inline for (std.meta.fields(T)) |fld| {
-                if (fld.default_value) |v| {
-                    // https://github.com/ziglang/zig/blob/d69e97ae1677ca487833caf6937fa428563ed0ae/lib/std/json.zig#L1590
-                    // why align(1) is used here?
-                    @field(result.args, fld.name) = @ptrCast(*align(1) const fld.type, v).*;
-                } else {
-                    if (!OptionType.from_zig_type(fld.type).is_required()) {
-                        @field(result.args, fld.name) = null;
-                    }
-                }
-            };
 
             var state = ParseState.start;
             var current_opt: ?*OptionField = null;
