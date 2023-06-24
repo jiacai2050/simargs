@@ -307,11 +307,11 @@ const OptionType = enum(u32) {
                 @compileError("not supported option type:" ++ @typeName(T));
             },
         };
-        return @intToEnum(@This(), @enumToInt(base_type) + if (is_optional) @This().REQUIRED_VERSION_SHIFT else 0);
+        return @enumFromInt(@This(), @intFromEnum(base_type) + if (is_optional) @This().REQUIRED_VERSION_SHIFT else 0);
     }
 
     fn is_required(self: Self) bool {
-        return @enumToInt(self) < REQUIRED_VERSION_SHIFT;
+        return @intFromEnum(self) < REQUIRED_VERSION_SHIFT;
     }
 
     fn as_string(self: Self) []const u8 {
