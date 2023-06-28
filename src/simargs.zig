@@ -160,7 +160,7 @@ fn StructArguments(
             }
 
             // Don't print default for false (?)bool
-            const default = @ptrCast(*align(1) const f.type, f.default_value.?).*;
+            const default = @as(*align(1) const f.type, @ptrCast(f.default_value.?)).*;
             switch (@typeInfo(f.type)) {
                 .Bool => if (!default) return,
                 .Optional => |opt| if (@typeInfo(opt.child) == .Bool)
@@ -307,7 +307,7 @@ const OptionType = enum(u32) {
                 @compileError("not supported option type:" ++ @typeName(T));
             },
         };
-        return @enumFromInt(@This(), @intFromEnum(base_type) + if (is_optional) @This().REQUIRED_VERSION_SHIFT else 0);
+        return @enumFromInt(@intFromEnum(base_type) + if (is_optional) @This().REQUIRED_VERSION_SHIFT else 0);
     }
 
     fn is_required(self: Self) bool {
@@ -385,7 +385,7 @@ fn OptionParser(
                 if (fld.default_value) |v| {
                     // https://github.com/ziglang/zig/blob/d69e97ae1677ca487833caf6937fa428563ed0ae/lib/std/json.zig#L1590
                     // why align(1) is used here?
-                    @field(args, fld.name) = @ptrCast(*align(1) const fld.type, v).*;
+                    @field(args, fld.name) = @as(*align(1) const fld.type, @ptrCast(v)).*;
                 } else {
                     const is_option = !comptime OptionType.from_zig_type(fld.type).is_required();
                     if (is_option) {
