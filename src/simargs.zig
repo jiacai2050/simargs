@@ -14,10 +14,11 @@ pub fn parse(
     allocator: std.mem.Allocator,
     comptime T: type,
     comptime arg_prompt: ?[]const u8,
+    version: ?[]const u8,
 ) OptionError!StructArguments(T, arg_prompt) {
     const args = try std.process.argsAlloc(allocator);
     var parser = OptionParser(T).init(allocator, args);
-    return parser.parse(arg_prompt);
+    return parser.parse(arg_prompt, version);
 }
 
 const OptionField = struct {
@@ -136,10 +137,9 @@ fn StructArguments(
         program: []const u8,
         // Parsed arguments
         args: T,
+        positional_args: std.ArrayList([]const u8),
         // Unparsed arguments
         raw_args: [][:0]u8,
-        comptime arg_prompt: ?[]const u8 = null,
-        positional_args: std.ArrayList([]const u8),
         allocator: std.mem.Allocator,
 
         const Self = @This();
@@ -375,6 +375,7 @@ fn OptionParser(
         fn parse(
             self: *Self,
             comptime arg_prompt: ?[]const u8,
+            version: ?[]const u8,
         ) OptionError!StructArguments(T, arg_prompt) {
             if (self.args.len == 0) {
                 return error.NoProgram;
@@ -462,10 +463,18 @@ fn OptionParser(
                             current_opt = null;
 
                             // if current option is help, print help_message and exit directly.
-                            if (!is_test and std.mem.eql(u8, opt.long_name, "help")) {
-                                const stdout = std.io.getStdOut();
-                                result.print_help(stdout.writer()) catch @panic("OOM");
-                                std.process.exit(0);
+                            if (!is_test) {
+                                if (std.mem.eql(u8, opt.long_name, "help")) {
+                                    const stdout = std.io.getStdOut();
+                                    result.print_help(stdout.writer()) catch @panic("OOM");
+                                    std.process.exit(0);
+                                } else if (std.mem.eql(u8, opt.long_name, "version")) {
+                                    if (version) |v| {
+                                        const stdout = std.io.getStdOut();
+                                        stdout.writer().writeAll(v) catch @panic("OOM");
+                                        std.process.exit(0);
+                                    }
+                                }
                             }
                         } else {
                             state = .waitValue;
@@ -577,7 +586,7 @@ test "parse/valid option values" {
     };
 
     var parser = OptionParser(TestArguments).init(allocator, &args);
-    const opt = try parser.parse("...");
+    const opt = try parser.parse("...", null);
     defer opt.deinit();
 
     try std.testing.expectEqualDeep(TestArguments{
@@ -621,7 +630,7 @@ test "parse/bool value" {
             allocator.free(arg);
         };
         var parser = OptionParser(struct { help: bool }).init(allocator, &args);
-        const opt = try parser.parse(null);
+        const opt = try parser.parse(null, null);
         defer opt.deinit();
 
         try std.testing.expectEqual(opt.args, .{ .help = true });
@@ -637,7 +646,7 @@ test "parse/bool value" {
             allocator.free(arg);
         };
         var parser = OptionParser(struct { help: bool }).init(allocator, &args);
-        const opt = try parser.parse(null);
+        const opt = try parser.parse(null, null);
         defer opt.deinit();
 
         try std.testing.expectEqual(opt.args, .{ .help = true });
@@ -662,7 +671,7 @@ test "parse/missing required arguments" {
     };
     var parser = OptionParser(TestArguments).init(allocator, &args);
 
-    try std.testing.expectError(error.MissingRequiredOption, parser.parse(null));
+    try std.testing.expectError(error.MissingRequiredOption, parser.parse(null, null));
 }
 
 test "parse/invalid u16 values" {
@@ -678,7 +687,7 @@ test "parse/invalid u16 values" {
     };
     var parser = OptionParser(TestArguments).init(allocator, &args);
 
-    try std.testing.expectError(error.InvalidCharacter, parser.parse(null));
+    try std.testing.expectError(error.InvalidCharacter, parser.parse(null, null));
 }
 
 test "parse/invalid f32 values" {
@@ -694,7 +703,7 @@ test "parse/invalid f32 values" {
     };
     var parser = OptionParser(TestArguments).init(allocator, &args);
 
-    try std.testing.expectError(error.InvalidCharacter, parser.parse(null));
+    try std.testing.expectError(error.InvalidCharacter, parser.parse(null, null));
 }
 
 test "parse/unknown option" {
@@ -711,7 +720,7 @@ test "parse/unknown option" {
     };
     var parser = OptionParser(TestArguments).init(allocator, &args);
 
-    try std.testing.expectError(error.NoOption, parser.parse(null));
+    try std.testing.expectError(error.NoOption, parser.parse(null, null));
 }
 
 test "parse/missing option value" {
@@ -726,7 +735,7 @@ test "parse/missing option value" {
     };
     var parser = OptionParser(TestArguments).init(allocator, &args);
 
-    try std.testing.expectError(error.MissingOptionValue, parser.parse(null));
+    try std.testing.expectError(error.MissingOptionValue, parser.parse(null, null));
 }
 
 test "parse/default value" {
@@ -749,7 +758,7 @@ test "parse/default value" {
 
         const __messages__ = .{ .d2 = "padding message" };
     }).init(allocator, &args);
-    const opt = try parser.parse("...");
+    const opt = try parser.parse("...", null);
     try std.testing.expectEqualStrings("A1", opt.args.a1);
     try std.testing.expectEqual(opt.positional_args.items.len, 0);
     var help_msg = std.ArrayList(u8).init(allocator);
@@ -787,7 +796,7 @@ test "parse/enum option" {
         a2: enum { C, D } = .D,
         a3: enum { X, Y },
     }).init(allocator, &args);
-    const opt = try parser.parse("...");
+    const opt = try parser.parse("...", null);
     defer opt.deinit();
 
     try std.testing.expectEqual(opt.args.a1, .A);
@@ -820,7 +829,7 @@ test "parse/positional arguments" {
     var parser = OptionParser(struct {
         a: u8 = 1,
     }).init(allocator, &args);
-    const opt = try parser.parse("...");
+    const opt = try parser.parse("...", null);
     defer opt.deinit();
 
     try std.testing.expectEqualDeep(opt.args, .{ .a = 1 });

@@ -33,7 +33,7 @@ pub fn main() !void {
             .output = "Write to file instead of stdout",
             .timeout = "Max time this request can cost",
         };
-    }, "[file]");
+    }, "[file]", null);
     defer opt.deinit();
 
     const sep = "-" ** 30;
