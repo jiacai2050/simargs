@@ -1,10 +1,14 @@
 #+TITLE: SimArgs
 #+DATE: 2022-12-07T22:56:41+0800
-#+LASTMOD: 2022-12-07T22:56:41+0800
+#+LASTMOD: 2023-10-21T13:10:50+0800
 #+AUTHOR: Jiacai Liu
 #+EMAIL: dev@liujiacai.net
 #+OPTIONS: toc:nil num:nil
 #+STARTUP: content
+
+#+begin_quote
+Notice: this repo has moved to https://github.com/jiacai2050/zigcli.
+#+end_quote
 
 [[https://github.com/jiacai2050/simargs/actions/workflows/CI.yml][https://github.com/jiacai2050/simargs/actions/workflows/CI.yml/badge.svg]]
 
